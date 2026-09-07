@@ -23,7 +23,20 @@ export default async function PropertyPage({
 
   if (!property) notFound()
 
-  // 2. Fetch all units linked to this property
+  // 2. Fetch assigned property manager details if manager_id exists
+  let managerName: string | null = null
+  if (property.manager_id) {
+    const { data: managerProfile } = await supabase
+      .from('profiles')
+      .select('first_name, last_name')
+      .eq('id', property.manager_id)
+      .single()
+    if (managerProfile) {
+      managerName = `${managerProfile.first_name || ''} ${managerProfile.last_name || ''}`.trim()
+    }
+  }
+
+  // 3. Fetch all units linked to this property
   const { data: units } = await supabase
     .from('units')
     .select('*')
@@ -34,20 +47,48 @@ export default async function PropertyPage({
     <div className="min-h-screen bg-gray-50 p-8 text-slate-900">
       <div className="max-w-6xl mx-auto">
         
-        <header className="flex justify-between items-center mb-8 pb-4 border-b">
+        <header className="flex flex-col md:flex-row md:justify-between md:items-center gap-4 mb-8 pb-4 border-b">
           <div>
-            <Link href="/dashboard" className="text-sm text-blue-600 hover:underline mb-2 block">
-              &larr; Back to Dashboard
-            </Link>
+            <div className="flex items-center gap-3 mb-2">
+              <Link href="/dashboard" className="text-sm text-blue-600 hover:underline">
+                &larr; Dashboard
+              </Link>
+              <span className="text-gray-300">/</span>
+              <Link href="/dashboard/properties" className="text-sm text-blue-600 hover:underline">
+                Properties
+              </Link>
+            </div>
             <h1 className="text-3xl font-bold">{property.name}</h1>
-            <p className="text-sm text-gray-500">{property.location}</p>
+            <div className="flex flex-wrap items-center gap-3 mt-1.5">
+              <p className="text-sm text-gray-500">{property.location}</p>
+              <span className="text-gray-300">&bull;</span>
+              <div className="text-xs">
+                {managerName ? (
+                  <span className="inline-flex items-center px-2 py-0.5 rounded-full font-medium bg-emerald-100 text-emerald-800">
+                    Manager: {managerName}
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center px-2 py-0.5 rounded-full font-medium bg-gray-100 text-gray-600">
+                    No Manager Assigned
+                  </span>
+                )}
+              </div>
+            </div>
           </div>
-          <Link 
-            href={`/dashboard/property/${propertyId}/add-unit`} 
-            className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 transition"
-          >
-            + Add Unit
-          </Link>
+          <div className="flex items-center gap-3">
+            <Link 
+              href={`/dashboard/properties?edit=${propertyId}`}
+              className="border border-gray-300 bg-white text-gray-700 px-4 py-2 rounded-md hover:bg-gray-50 transition font-medium text-sm shadow-sm"
+            >
+              Edit Property
+            </Link>
+            <Link 
+              href={`/dashboard/property/${propertyId}/add-unit`} 
+              className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 transition font-medium text-sm shadow-sm"
+            >
+              + Add Unit
+            </Link>
+          </div>
         </header>
 
         <section className="bg-white p-6 rounded-lg shadow-sm border">

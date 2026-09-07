@@ -12,7 +12,7 @@ export async function addTenant(formData: FormData) {
   const first_name = formData.get('first_name') as string
   const last_name = formData.get('last_name') as string
   const email = formData.get('email') as string
-  const phone = formData.get('phone') as string
+  const phone_number = formData.get('phone_number') as string
 
   const { data: tenant, error } = await supabase
     .from('tenants')
@@ -21,7 +21,7 @@ export async function addTenant(formData: FormData) {
         first_name, 
         last_name, 
         email, 
-        phone,
+        phone_number,
         agency_id: agencyId // Stamp it!
       }
     ])
@@ -29,7 +29,7 @@ export async function addTenant(formData: FormData) {
 
   if (error) {
     console.error('Error adding tenant:', error)
-    redirect('/dashboard/tenants/new?message=Error adding tenant')
+    redirect('/dashboard/tenants/add?message=Error adding tenant')
   }
 
   revalidatePath('/dashboard/tenants')

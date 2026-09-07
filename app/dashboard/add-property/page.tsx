@@ -1,5 +1,7 @@
 // app/dashboard/add-property/page.tsx
 import { addProperty } from './actions'
+import { createClient } from '@/utils/supabase/server'
+import { getUserAgencyContext } from '@/utils/supabase/get-context'
 import Link from 'next/link'
 
 export default async function AddPropertyPage({
@@ -7,9 +9,20 @@ export default async function AddPropertyPage({
 }: {
   searchParams: Promise<{ message?: string }>
 }) {
-  // Await the searchParams promise here
   const resolvedSearchParams = await searchParams
   const message = resolvedSearchParams.message
+
+  const supabase = await createClient()
+  const { agencyId, role } = await getUserAgencyContext()
+  const isOwner = role === 'agency_owner'
+
+  // Fetch all property managers for this agency
+  const { data: propertyManagers } = await supabase
+    .from('profiles')
+    .select('id, first_name, last_name, role')
+    .eq('agency_id', agencyId)
+    .eq('role', 'property_manager')
+    .order('first_name', { ascending: true })
 
   return (
     <div className="min-h-screen bg-gray-50 p-8 text-slate-900 flex items-center justify-center">
@@ -29,6 +42,7 @@ export default async function AddPropertyPage({
               Property Name
             </label>
             <input
+              id="name"
               className="w-full rounded-md px-4 py-2 border bg-gray-50 focus:bg-white"
               name="name"
               placeholder="e.g. Sunrise Apartments"
@@ -41,6 +55,7 @@ export default async function AddPropertyPage({
               Location
             </label>
             <input
+              id="location"
               className="w-full rounded-md px-4 py-2 border bg-gray-50 focus:bg-white"
               name="location"
               placeholder="e.g. Westlands, Nairobi"
@@ -48,14 +63,64 @@ export default async function AddPropertyPage({
             />
           </div>
 
+          {/* Property Manager Dropdown */}
+          <div>
+            <label className="block text-sm font-medium mb-1" htmlFor="manager_id">
+              Assign Property Manager
+            </label>
+            {isOwner ? (
+              <>
+                <select
+                  id="manager_id"
+                  name="manager_id"
+                  className="w-full rounded-md px-4 py-2 border bg-gray-50 focus:bg-white"
+                  defaultValue=""
+                >
+                  <option value="">-- Select Property Manager (Optional) --</option>
+                  {propertyManagers && propertyManagers.length > 0 ? (
+                    propertyManagers.map((manager) => {
+                      const displayName =
+                        `${manager.first_name || ''} ${manager.last_name || ''}`.trim() ||
+                        `Manager (${manager.id.slice(0, 6)})`
+                      return (
+                        <option key={manager.id} value={manager.id}>
+                          {displayName}
+                        </option>
+                      )
+                    })
+                  ) : (
+                    <option value="" disabled>
+                      No property managers registered
+                    </option>
+                  )}
+                </select>
+                {(!propertyManagers || propertyManagers.length === 0) && (
+                  <p className="text-xs text-amber-600 mt-1">
+                    No property managers found. You can invite managers under{' '}
+                    <Link href="/dashboard/team" className="underline font-medium">
+                      Team Management
+                    </Link>
+                    .
+                  </p>
+                )}
+              </>
+            ) : (
+              <div className="rounded-md border bg-gray-100 px-3 py-2 text-sm text-gray-700">
+                <p className="font-medium">Unassigned</p>
+                <p className="text-xs text-gray-500 mt-1">
+                  Only the Agency Owner can assign or change property managers.
+                </p>
+              </div>
+            )}
+          </div>
+
           <button
             type="submit"
-            className="mt-4 bg-green-700 text-white rounded-md px-4 py-2 hover:bg-green-800 transition"
+            className="mt-4 bg-green-700 text-white rounded-md px-4 py-2 hover:bg-green-800 transition font-medium"
           >
             Save Property
           </button>
 
-          {/* Update this line to just use the message variable */}
           {message && (
             <p className="mt-2 text-sm text-red-600 text-center">
               {message}

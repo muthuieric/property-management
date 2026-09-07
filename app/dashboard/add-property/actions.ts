@@ -4,19 +4,22 @@
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { createClient } from '@/utils/supabase/server'
-import { getUserAgencyContext } from '@/utils/supabase/get-context' // 1. Import it
+import { getUserAgencyContext } from '@/utils/supabase/get-context'
 
 export async function addProperty(formData: FormData) {
   const supabase = await createClient()
   
-  // 2. Grab the current user's agency ID
-  const { agencyId } = await getUserAgencyContext()
+  // Grab current user's agency ID and role
+  const { agencyId, role } = await getUserAgencyContext()
 
   const name = formData.get('name') as string
   const location = formData.get('location') as string
-  const property_type = formData.get('property_type') as string
+  const property_type = (formData.get('property_type') as string) || null
+  const rawManagerId = formData.get('manager_id') as string
 
-  // 3. Inject it into the insert statement
+  // Only Agency Owners can assign a manager
+  const manager_id = role === 'agency_owner' && rawManagerId ? rawManagerId : null
+
   const { error } = await supabase
     .from('properties')
     .insert([
@@ -24,7 +27,8 @@ export async function addProperty(formData: FormData) {
         name, 
         location, 
         property_type,
-        agency_id: agencyId // Links the property to the paying customer!
+        agency_id: agencyId,
+        manager_id,
       }
     ])
 
@@ -34,5 +38,6 @@ export async function addProperty(formData: FormData) {
   }
 
   revalidatePath('/dashboard')
+  revalidatePath('/dashboard/properties')
   redirect('/dashboard')
 }

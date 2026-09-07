@@ -38,6 +38,12 @@ export default async function DashboardLayout({
             Overview
           </Link>
           <Link 
+            href="/dashboard/properties" 
+            className="whitespace-nowrap px-4 py-3 rounded-md text-sm font-medium hover:bg-slate-800 transition"
+          >
+            Properties
+          </Link>
+          <Link 
             href="/dashboard/tenants" 
             className="whitespace-nowrap px-4 py-3 rounded-md text-sm font-medium hover:bg-slate-800 transition"
           >
@@ -48,6 +54,12 @@ export default async function DashboardLayout({
             className="whitespace-nowrap px-4 py-3 rounded-md text-sm font-medium hover:bg-slate-800 transition"
           >
             Maintenance
+          </Link>
+          <Link 
+            href="/dashboard/financials" 
+            className="whitespace-nowrap px-4 py-3 rounded-md text-sm font-medium hover:bg-slate-800 transition"
+          >
+            Financials
           </Link>
           <Link 
             href="/dashboard/deposits" 
