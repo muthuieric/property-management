@@ -3,6 +3,30 @@ import { createClient } from '@/utils/supabase/server'
 import { redirect } from 'next/navigation'
 import { createTenantTicket } from './actions'
 
+function formatDateTime(dateStr: string) {
+  return new Date(dateStr).toLocaleString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  })
+}
+
+function calculateDuration(startStr: string, endStr?: string | null) {
+  const start = new Date(startStr).getTime()
+  const end = endStr ? new Date(endStr).getTime() : Date.now()
+  const diffMs = Math.max(0, end - start)
+  const diffMinutes = Math.floor(diffMs / (1000 * 60))
+  const diffHours = Math.floor(diffMs / (1000 * 60 * 60))
+  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24))
+
+  if (diffMinutes < 60) return `${diffMinutes}m`
+  if (diffHours < 24) return `${diffHours}h ${diffMinutes % 60}m`
+  if (diffDays === 1) return `1 day ${diffHours % 24}h`
+  return `${diffDays} days`
+}
+
 export default async function TenantMaintenancePage({
   searchParams,
 }: {
@@ -61,6 +85,8 @@ export default async function TenantMaintenancePage({
         issue_description,
         status,
         created_at,
+        resolved_at,
+        cost,
         image_url,
         units (
           unit_number,
@@ -69,7 +95,7 @@ export default async function TenantMaintenancePage({
           )
         )
       `)
-      .eq('reported_by', tenant.id)
+      .or(`reported_by.eq.${tenant.id},tenant_id.eq.${tenant.id}`)
       .order('created_at', { ascending: false })
 
     tickets = tenantTickets || []
@@ -110,62 +136,115 @@ export default async function TenantMaintenancePage({
               </p>
             </div>
           ) : (
-            <div className="flex flex-col gap-4">
-              {tickets.map((ticket) => (
-                <div
-                  key={ticket.id}
-                  className="bg-white border rounded-lg p-5 shadow-sm hover:shadow-md transition"
-                >
-                  <div className="flex justify-between items-start gap-4 mb-2">
-                    <h3 className="font-semibold text-slate-900 text-base leading-snug">
-                      {ticket.issue_description}
-                    </h3>
-                    <span
-                      className={`text-xs px-2.5 py-0.5 rounded-full font-medium shrink-0 ${
-                        ticket.status === 'Resolved'
-                          ? 'bg-emerald-100 text-emerald-800'
-                          : ticket.status === 'In Progress'
-                          ? 'bg-blue-100 text-blue-800'
-                          : 'bg-amber-100 text-amber-800'
-                      }`}
+              <div className="flex flex-col gap-4">
+                {tickets.map((ticket) => {
+                  const isResolved = ticket.status === 'Resolved'
+                  const isInProgress = ticket.status === 'In Progress'
+                  const isPending = !isResolved && !isInProgress
+
+                  const duration = calculateDuration(ticket.created_at, ticket.resolved_at)
+
+                  return (
+                    <div
+                      key={ticket.id}
+                      className="bg-white border rounded-xl p-5 shadow-sm hover:shadow-md transition"
                     >
-                      {ticket.status || 'Open'}
-                    </span>
-                  </div>
+                      <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3 mb-2">
+                        <div className="flex-1">
+                          <h3 className="font-semibold text-slate-900 text-base leading-snug">
+                            {ticket.issue_description}
+                          </h3>
+                          <p className="text-xs text-slate-500 mt-1">
+                            Unit #{ticket.units?.unit_number} &bull; {ticket.units?.properties?.name}
+                          </p>
+                        </div>
 
-                  {ticket.image_url && (
-                    <div className="my-3">
-                      <a
-                        href={ticket.image_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-block"
-                      >
-                        <img
-                          src={ticket.image_url}
-                          alt="Issue photo"
-                          className="max-h-48 rounded-md border border-gray-200 object-cover hover:opacity-90 transition"
-                        />
-                      </a>
+                        <div className="flex items-center gap-2 self-start shrink-0">
+                          {ticket.cost != null && Number(ticket.cost) > 0 && (
+                            <span className="text-xs font-semibold px-2 py-0.5 rounded bg-slate-100 text-slate-700 border border-slate-200">
+                              KES {Number(ticket.cost).toLocaleString()}
+                            </span>
+                          )}
+
+                          {isResolved && (
+                            <span className="inline-flex items-center gap-1 text-xs px-3 py-1 rounded-full font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                              <svg className="w-3.5 h-3.5 text-emerald-600" fill="currentColor" viewBox="0 0 20 20">
+                                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                              </svg>
+                              Resolved
+                            </span>
+                          )}
+
+                          {isInProgress && (
+                            <span className="inline-flex items-center gap-1 text-xs px-3 py-1 rounded-full font-semibold bg-blue-50 text-blue-700 border border-blue-200">
+                              <span className="h-2 w-2 rounded-full bg-blue-600 animate-ping mr-0.5" />
+                              In Progress
+                            </span>
+                          )}
+
+                          {isPending && (
+                            <span className="inline-flex items-center gap-1 text-xs px-3 py-1 rounded-full font-semibold bg-amber-50 text-amber-800 border border-amber-200">
+                              <svg className="w-3.5 h-3.5 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                              </svg>
+                              Pending Review
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      {ticket.image_url && (
+                        <div className="my-3">
+                          <a
+                            href={ticket.image_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-block"
+                          >
+                            <img
+                              src={ticket.image_url}
+                              alt="Issue photo"
+                              className="max-h-48 rounded-lg border border-gray-200 object-cover hover:opacity-90 transition"
+                            />
+                          </a>
+                        </div>
+                      )}
+
+                      {/* Timestamps & Coordinator Accountability */}
+                      <div className="mt-3 pt-3 border-t border-gray-100 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs text-gray-500">
+                        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                          <span className="flex items-center gap-1 text-slate-600">
+                            <span className="text-gray-400">Submitted:</span>
+                            <span className="font-medium text-slate-800">{formatDateTime(ticket.created_at)}</span>
+                          </span>
+
+                          {ticket.resolved_at && (
+                            <>
+                              <span>&bull;</span>
+                              <span className="flex items-center gap-1 text-emerald-700">
+                                <span className="text-gray-400">Resolved:</span>
+                                <span className="font-medium">{formatDateTime(ticket.resolved_at)}</span>
+                              </span>
+                            </>
+                          )}
+                        </div>
+
+                        <div>
+                          {isResolved ? (
+                            <span className="inline-flex items-center gap-1 font-medium text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-100">
+                              <span>⚡ Resolved in {duration}</span>
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 font-medium text-amber-800 bg-amber-50 px-2 py-0.5 rounded border border-amber-100">
+                              <span>⏳ Open for {duration}</span>
+                            </span>
+                          )}
+                        </div>
+                      </div>
                     </div>
-                  )}
-
-                  <div className="flex flex-wrap items-center gap-4 text-xs text-gray-500 mt-3 pt-3 border-t">
-                    <span>
-                      Unit #{ticket.units?.unit_number} ({ticket.units?.properties?.name})
-                    </span>
-                    <span>&bull;</span>
-                    <span>
-                      Submitted: {new Date(ticket.created_at).toLocaleDateString('en-US', {
-                        year: 'numeric',
-                        month: 'short',
-                        day: 'numeric'
-                      })}
-                    </span>
-                  </div>
-                </div>
-              ))}
-            </div>
+                  )
+                })}
+              </div>
           )}
         </div>
 

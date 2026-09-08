@@ -66,10 +66,11 @@ export async function createTenantTicket(formData: FormData) {
     .insert([
       {
         unit_id: lease.unit_id,
+        tenant_id: tenant.id,
         reported_by: tenant.id,
         issue_description: issue_description.trim(),
         image_url,
-        status: 'Open',
+        status: 'Pending',
         agency_id: lease.agency_id || tenant.agency_id,
       }
     ])

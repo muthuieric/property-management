@@ -64,6 +64,7 @@ export async function registerAgency(formData: FormData) {
   const agencyId = agency.id
 
   // 4. INSERT / UPSERT into profiles table linking user to agency_id with role 'agency_owner'
+  // Pass is_active: true explicitly to prevent immediate lockouts
   const { error: profileError } = await supabaseAdmin
     .from('profiles')
     .upsert([
@@ -73,6 +74,7 @@ export async function registerAgency(formData: FormData) {
         role: 'agency_owner',
         first_name,
         last_name,
+        is_active: true,
       },
     ])
 
@@ -85,4 +87,3 @@ export async function registerAgency(formData: FormData) {
   revalidatePath('/', 'layout')
   redirect('/dashboard')
 }
-
