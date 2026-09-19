@@ -4,6 +4,8 @@ import { revalidatePath } from 'next/cache'
 import { createClient as createServerClient } from '@/utils/supabase/server'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
 import { getUserAgencyContext } from '@/utils/supabase/get-context'
+import { syncSingleTenantToKaribu, syncAgencyDirectoryToKaribu } from '@/utils/karibu/sync'
+import { testConnection } from '@/utils/karibu/client'
 
 export interface AddTenantResult {
   success: boolean
@@ -65,6 +67,7 @@ export async function addTenant(formData: FormData): Promise<AddTenantResult> {
   const last_name = (formData.get('last_name') as string)?.trim()
   const email = (formData.get('email') as string)?.trim().toLowerCase()
   const phone_number = (formData.get('phone_number') as string)?.trim()
+  const property_id = (formData.get('property_id') as string)?.trim() || undefined
   const rawPassword = (formData.get('password') as string)?.trim()
   const password = rawPassword || 'TenantPass2026!'
 
@@ -159,6 +162,13 @@ export async function addTenant(formData: FormData): Promise<AddTenantResult> {
       } catch {}
       return { success: false, error: tenantError.message }
     }
+
+    // 3d. Synchronize newly registered tenant to Karibu VMS
+    try {
+      await syncSingleTenantToKaribu(newUserId, { propertyId: property_id })
+    } catch (vmsErr: any) {
+      console.warn('[Karibu VMS] Non-blocking registration sync warning:', vmsErr)
+    }
   } catch (err: any) {
     console.error('Unhandled exception during tenant registration:', err)
     if (newUserId) {
@@ -182,4 +192,72 @@ export async function addTenant(formData: FormData): Promise<AddTenantResult> {
   }
 
   return { success: true }
+}
+
+/**
+ * Bulk synchronize all agency properties and tenants to Karibu VMS
+ */
+export async function syncAllTenantsToKaribuAction(): Promise<{
+  success: boolean
+  message: string
+  groupsCount?: number
+  usersCount?: number
+  error?: string
+}> {
+  try {
+    const { agencyId } = await getUserAgencyContext()
+    if (!agencyId) {
+      return { success: false, message: 'Could not resolve agency identifier.', error: 'Unauthorized' }
+    }
+
+    const res = await syncAgencyDirectoryToKaribu(agencyId)
+    revalidatePath('/dashboard/tenants')
+    return res
+  } catch (err: any) {
+    console.error('syncAllTenantsToKaribuAction failed:', err)
+    return {
+      success: false,
+      message: err?.message || 'Directory synchronization encountered an unexpected error.',
+      error: err?.message,
+    }
+  }
+}
+
+/**
+ * Synchronize a single tenant to Karibu VMS
+ */
+export async function syncSingleTenantAction(tenantId: string): Promise<{
+  success: boolean
+  message: string
+  error?: string
+}> {
+  try {
+    const res = await syncSingleTenantToKaribu(tenantId)
+    revalidatePath('/dashboard/tenants')
+    return res
+  } catch (err: any) {
+    console.error(`syncSingleTenantAction failed for ${tenantId}:`, err)
+    return {
+      success: false,
+      message: err?.message || 'Tenant synchronization failed.',
+      error: err?.message,
+    }
+  }
+}
+
+/**
+ * Test connectivity with Karibu VMS Directory Sync API
+ */
+export async function testKaribuConnectionAction(): Promise<{
+  ok: boolean
+  message: string
+}> {
+  try {
+    return await testConnection()
+  } catch (err: any) {
+    return {
+      ok: false,
+      message: err?.message || 'Failed to connect to Karibu VMS.',
+    }
+  }
 }

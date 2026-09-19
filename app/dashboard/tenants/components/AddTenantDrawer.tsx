@@ -5,12 +5,18 @@ import { useRouter } from 'next/navigation'
 import SlideOverDrawer from '@/app/dashboard/components/SlideOverDrawer'
 import { addTenant } from '../actions'
 
+interface PropertyOption {
+  id: string
+  name: string
+}
+
 interface AddTenantDrawerProps {
   isOpen: boolean
   onClose: () => void
+  properties?: PropertyOption[]
 }
 
-export default function AddTenantDrawer({ isOpen, onClose }: AddTenantDrawerProps) {
+export default function AddTenantDrawer({ isOpen, onClose, properties = [] }: AddTenantDrawerProps) {
   const router = useRouter()
   const formRef = useRef<HTMLFormElement>(null)
   const [isPending, startTransition] = useTransition()
@@ -190,6 +196,45 @@ export default function AddTenantDrawer({ isOpen, onClose }: AddTenantDrawerProp
             </div>
           </div>
         </div>
+
+        {/* Section 3: Property & Visitor Access Destination (Optional) */}
+        {properties && properties.length > 0 && (
+          <>
+            <div className="border-t border-slate-200/80" />
+            <div>
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-xs font-bold uppercase tracking-wider text-slate-900 flex items-center gap-2">
+                  <span>Assigned Property / VMS Site</span>
+                </h3>
+                <span className="text-[10px] bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded font-semibold border border-emerald-200/60">
+                  Karibu VMS Sync
+                </span>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1" htmlFor="drawer_property_id">
+                  Property Site <span className="text-slate-400 font-normal">(Optional)</span>
+                </label>
+                <select
+                  id="drawer_property_id"
+                  name="property_id"
+                  className="w-full rounded-lg px-3.5 py-2.5 text-xs bg-white border border-slate-200 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-slate-900 transition"
+                  defaultValue=""
+                >
+                  <option value="">-- General Agency Directory (Unassigned) --</option>
+                  {properties.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-[11px] text-slate-400 mt-1">
+                  If selected, this tenant is synchronized under this building in Karibu VMS for visitor host authorization.
+                </p>
+              </div>
+            </div>
+          </>
+        )}
       </form>
     </SlideOverDrawer>
   )

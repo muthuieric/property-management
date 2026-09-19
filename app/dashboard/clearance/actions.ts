@@ -5,6 +5,7 @@ import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { createClient } from '@/utils/supabase/server'
 import { getUserAgencyContext } from '@/utils/supabase/get-context'
+import { removeTenantFromKaribu } from '@/utils/karibu/sync'
 
 export async function postWaterBill(formData: FormData) {
   const supabase = await createClient()
@@ -209,6 +210,15 @@ export async function initiateMoveOut(formData: FormData) {
 
   if (unitError) {
     console.error('Error updating unit status to vacant:', unitError)
+  }
+
+  // 3b. Remove tenant record from Karibu VMS access directory
+  if (tenant_id) {
+    try {
+      await removeTenantFromKaribu(tenant_id)
+    } catch (vmsErr) {
+      console.warn('[Karibu VMS] Non-blocking move-out deprovision warning:', vmsErr)
+    }
   }
 
   // 4. Refresh all relevant routes across dashboard and tenant portal

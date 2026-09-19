@@ -6,6 +6,8 @@ import { toggleUserStatusFormAction } from '@/app/dashboard/team/actions'
 import TenantAddTrigger from './components/TenantAddTrigger'
 import TenantLeaseTrigger from './components/TenantLeaseTrigger'
 import TenantCreateLeaseHeaderTrigger from './components/TenantCreateLeaseHeaderTrigger'
+import SyncKaribuTrigger from './components/SyncKaribuTrigger'
+import TenantVmsSyncButton from './components/TenantVmsSyncButton'
 import { UnitOption } from '@/app/dashboard/components/CreateLeaseDrawer'
 
 export default async function TenantsPage({
@@ -136,17 +138,17 @@ export default async function TenantsPage({
     })
   }
 
-  // 5. Fetch vacant units (scoped to assigned properties for coordinators)
-  let targetPropertyIds: string[] = []
-  if (isOwner) {
-    const { data: agencyProperties } = await supabase
-      .from('properties')
-      .select('id, name')
-      .eq('agency_id', agencyId)
-    targetPropertyIds = agencyProperties?.map((p) => p.id) || []
-  } else {
-    targetPropertyIds = assignedPropertyIds
-  }
+  // 5. Fetch properties for this agency
+  const { data: agencyProperties } = await supabase
+    .from('properties')
+    .select('id, name')
+    .eq('agency_id', agencyId)
+    .order('name', { ascending: true })
+
+  const propertiesList = agencyProperties || []
+  const targetPropertyIds = isOwner
+    ? propertiesList.map((p) => p.id)
+    : assignedPropertyIds
 
   let vacantUnits: UnitOption[] = []
   if (targetPropertyIds.length > 0) {
@@ -212,6 +214,10 @@ export default async function TenantsPage({
         </div>
 
         <div className="flex items-center gap-2.5">
+          <SyncKaribuTrigger
+            propertiesCount={propertiesList.length}
+            tenantsCount={tenants.length}
+          />
           <TenantCreateLeaseHeaderTrigger
             activeTenants={activeTenantsList.map((t) => ({
               id: t.id,
@@ -222,7 +228,7 @@ export default async function TenantsPage({
             }))}
             vacantUnits={vacantUnits}
           />
-          <TenantAddTrigger />
+          <TenantAddTrigger properties={propertiesList} />
         </div>
       </header>
 
@@ -460,6 +466,12 @@ export default async function TenantsPage({
                               View Ledger
                             </Link>
                           )}
+
+                          {/* Sync to Karibu VMS Button */}
+                          <TenantVmsSyncButton
+                            tenantId={tenant.id}
+                            tenantName={`${tenant.first_name || ''} ${tenant.last_name || ''}`.trim()}
+                          />
 
                           {/* + Create Lease In-Page Drawer Trigger (if active and unleased) */}
                           {isActive && !unit && (

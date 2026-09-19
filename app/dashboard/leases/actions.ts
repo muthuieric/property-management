@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/utils/supabase/server'
 import { getUserAgencyContext } from '@/utils/supabase/get-context'
+import { syncSingleTenantToKaribu } from '@/utils/karibu/sync'
 
 export interface CreateLeaseResult {
   success: boolean
@@ -116,6 +117,16 @@ export async function createLease(formData: FormData): Promise<CreateLeaseResult
 
     if (unitUpdateErr) {
       console.error('Warning: Failed to update unit occupancy status:', unitUpdateErr)
+    }
+
+    // 3b. Sync tenant with updated unit and property into Karibu VMS
+    try {
+      await syncSingleTenantToKaribu(tenant_id, {
+        propertyId: unitRecord.property_id,
+        unitNumber: unitRecord.unit_number,
+      })
+    } catch (vmsErr) {
+      console.warn('[Karibu VMS] Non-blocking lease sync warning:', vmsErr)
     }
 
     // 4. Revalidate all dependent dashboard views
