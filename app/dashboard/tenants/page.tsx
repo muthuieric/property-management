@@ -4,6 +4,9 @@ import { getUserAgencyContext } from '@/utils/supabase/get-context'
 import Link from 'next/link'
 import { toggleUserStatusFormAction } from '@/app/dashboard/team/actions'
 import TenantAddTrigger from './components/TenantAddTrigger'
+import TenantLeaseTrigger from './components/TenantLeaseTrigger'
+import TenantCreateLeaseHeaderTrigger from './components/TenantCreateLeaseHeaderTrigger'
+import { UnitOption } from '@/app/dashboard/components/CreateLeaseDrawer'
 
 export default async function TenantsPage({
   searchParams,
@@ -14,28 +17,111 @@ export default async function TenantsPage({
   const message = resolvedSearchParams.message
 
   const supabase = await createClient()
-  const { agencyId, role } = await getUserAgencyContext()
+  const { userId, agencyId, role } = await getUserAgencyContext()
   const isOwner = role === 'agency_owner'
 
-  // 1. Fetch all tenants for this agency
-  const { data: tenantsData } = await supabase
-    .from('tenants')
+  // 1. Identify assigned properties for coordinator, or agency properties for owner
+  let assignedPropertyIds: string[] = []
+  if (!isOwner) {
+    const { data: assignedProps } = await supabase
+      .from('properties')
+      .select('id')
+      .eq('agency_id', agencyId)
+      .eq('manager_id', userId)
+
+    assignedPropertyIds = (assignedProps || []).map((p) => p.id)
+  }
+
+  // 2. Fetch leases to determine tenant scope and financial metrics
+  let leasesQuery = supabase
+    .from('leases')
     .select(`
       id,
-      first_name,
-      last_name,
-      email,
-      phone_number,
-      user_id,
+      tenant_id,
+      deposit_amount,
       is_active,
-      created_at
+      units!inner (
+        id,
+        unit_number,
+        base_rent,
+        property_id,
+        properties!inner ( name )
+      )
     `)
     .eq('agency_id', agencyId)
-    .order('first_name', { ascending: true })
 
-  const tenants = tenantsData || []
+  if (!isOwner) {
+    if (assignedPropertyIds.length > 0) {
+      leasesQuery = leasesQuery.in('units.property_id', assignedPropertyIds)
+    } else {
+      leasesQuery = null as any
+    }
+  }
 
-  // 2. Fetch profiles for these tenants to determine auth suspension
+  let allScopedLeases: any[] = []
+  if (leasesQuery) {
+    const { data } = await leasesQuery
+    allScopedLeases = data || []
+  }
+
+  const activeLeases = allScopedLeases.filter((l) => l.is_active === true)
+
+  const leaseMap = new Map<string, any>()
+  activeLeases.forEach((l) => {
+    if (l.tenant_id) {
+      leaseMap.set(l.tenant_id, l)
+    }
+  })
+
+  // 3. Fetch tenants: scoped to assigned property leases for coordinators, or entire agency for owner
+  let tenants: any[] = []
+
+  if (!isOwner) {
+    if (assignedPropertyIds.length > 0) {
+      const assignedTenantIds = Array.from(
+        new Set(allScopedLeases.map((l) => l.tenant_id).filter(Boolean))
+      )
+
+      if (assignedTenantIds.length > 0) {
+        const { data: tenantsData } = await supabase
+          .from('tenants')
+          .select(`
+            id,
+            first_name,
+            last_name,
+            email,
+            phone_number,
+            user_id,
+            is_active,
+            created_at
+          `)
+          .eq('agency_id', agencyId)
+          .in('id', assignedTenantIds)
+          .order('first_name', { ascending: true })
+
+        tenants = tenantsData || []
+      }
+    }
+  } else {
+    const { data: tenantsData } = await supabase
+      .from('tenants')
+      .select(`
+        id,
+        first_name,
+        last_name,
+        email,
+        phone_number,
+        user_id,
+        is_active,
+        created_at
+      `)
+      .eq('agency_id', agencyId)
+      .order('first_name', { ascending: true })
+
+    tenants = tenantsData || []
+  }
+
+  // 4. Fetch profiles for these tenants to determine auth suspension
   const tenantUserIds = tenants.map((t) => t.user_id).filter(Boolean)
   const profileStatusMap = new Map<string, boolean>()
 
@@ -50,36 +136,47 @@ export default async function TenantsPage({
     })
   }
 
-  // 3. Fetch all active leases to display financial alignment (rent & deposit in trust)
-  const { data: activeLeases } = await supabase
-    .from('leases')
-    .select(`
-      id,
-      tenant_id,
-      deposit_amount,
-      is_active,
-      units (
+  // 5. Fetch vacant units (scoped to assigned properties for coordinators)
+  let targetPropertyIds: string[] = []
+  if (isOwner) {
+    const { data: agencyProperties } = await supabase
+      .from('properties')
+      .select('id, name')
+      .eq('agency_id', agencyId)
+    targetPropertyIds = agencyProperties?.map((p) => p.id) || []
+  } else {
+    targetPropertyIds = assignedPropertyIds
+  }
+
+  let vacantUnits: UnitOption[] = []
+  if (targetPropertyIds.length > 0) {
+    const { data: vUnits } = await supabase
+      .from('units')
+      .select(`
         id,
         unit_number,
         base_rent,
+        property_id,
         properties ( name )
-      )
-    `)
-    .eq('agency_id', agencyId)
-    .eq('is_active', true)
+      `)
+      .in('property_id', targetPropertyIds)
+      .eq('is_occupied', false)
+      .order('unit_number', { ascending: true })
 
-  const leaseMap = new Map<string, any>()
-  activeLeases?.forEach((l) => {
-    if (l.tenant_id) {
-      leaseMap.set(l.tenant_id, l)
-    }
-  })
+    vacantUnits = (vUnits || []).map((u: any) => ({
+      id: u.id,
+      unit_number: u.unit_number,
+      base_rent: Number(u.base_rent || 0),
+      property_name: u.properties?.name || 'Property Site',
+    }))
+  }
 
   // Compute directory aggregates
-  const activeTenantsCount = tenants.filter((t) => {
+  const activeTenantsList = tenants.filter((t) => {
     const profileActive = t.user_id ? profileStatusMap.get(t.user_id) : true
     return t.is_active !== false && profileActive !== false
-  }).length
+  })
+  const activeTenantsCount = activeTenantsList.length
   const suspendedTenantsCount = tenants.length - activeTenantsCount
 
   const totalContractedRent = activeLeases?.reduce((sum, l) => {
@@ -115,6 +212,16 @@ export default async function TenantsPage({
         </div>
 
         <div className="flex items-center gap-2.5">
+          <TenantCreateLeaseHeaderTrigger
+            activeTenants={activeTenantsList.map((t) => ({
+              id: t.id,
+              first_name: t.first_name,
+              last_name: t.last_name,
+              email: t.email,
+              phone_number: t.phone_number,
+            }))}
+            vacantUnits={vacantUnits}
+          />
           <TenantAddTrigger />
         </div>
       </header>
@@ -216,8 +323,14 @@ export default async function TenantsPage({
             <svg className="w-10 h-10 text-slate-300 mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0zM7 10a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0z" />
             </svg>
-            <p className="font-semibold text-slate-700 text-sm">No Tenants Registered</p>
-            <p className="text-xs text-slate-400 mt-1">Click &quot;+ Register Tenant&quot; above to onboard your first occupant.</p>
+            <p className="font-semibold text-slate-700 text-sm">
+              {isOwner ? 'No Tenants Registered' : 'No Tenants in Scope'}
+            </p>
+            <p className="text-xs text-slate-400 mt-1">
+              {isOwner
+                ? 'Click "+ Register Tenant" above to onboard your first occupant.'
+                : 'No tenants with leases found for your assigned properties.'}
+            </p>
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -338,22 +451,28 @@ export default async function TenantsPage({
                       {/* Quick Actions (Ghost buttons styled with hover:bg-slate-100 and cursor-pointer) */}
                       <td className="p-4 pr-6 text-right whitespace-nowrap">
                         <div className="flex items-center justify-end gap-1.5">
-                          {/* View Ledger Ghost Button */}
-                          <Link
-                            href={`/dashboard/financials?tenant_id=${tenant.id}`}
-                            className="px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-700 hover:text-slate-900 hover:bg-slate-100 cursor-pointer transition-all duration-200 ease-in-out inline-flex items-center"
-                          >
-                            View Ledger
-                          </Link>
-
-                          {/* + Create Lease (if active and unleased) */}
-                          {isActive && !unit && (
+                          {/* View Ledger Ghost Button (Agency Owner only) */}
+                          {isOwner && (
                             <Link
-                              href={`/dashboard/leases/new?tenant_id=${tenant.id}`}
-                              className="px-2.5 py-1.5 rounded-lg text-xs font-semibold text-emerald-700 hover:text-emerald-800 hover:bg-slate-100 cursor-pointer transition-all duration-200 ease-in-out inline-flex items-center"
+                              href={`/dashboard/financials?tenant_id=${tenant.id}`}
+                              className="px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-700 hover:text-slate-900 hover:bg-slate-100 cursor-pointer transition-all duration-200 ease-in-out inline-flex items-center"
                             >
-                              + Lease
+                              View Ledger
                             </Link>
+                          )}
+
+                          {/* + Create Lease In-Page Drawer Trigger (if active and unleased) */}
+                          {isActive && !unit && (
+                            <TenantLeaseTrigger
+                              tenant={{
+                                id: tenant.id,
+                                first_name: tenant.first_name,
+                                last_name: tenant.last_name,
+                                email: tenant.email,
+                                phone_number: tenant.phone_number,
+                              }}
+                              vacantUnits={vacantUnits}
+                            />
                           )}
 
                           {/* Suspend / Reactivate Ghost Button (Owner Only) */}

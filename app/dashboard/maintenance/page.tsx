@@ -24,7 +24,7 @@ export default async function MaintenancePage() {
   const supabase = await createClient()
   const { userId, agencyId, role } = await getUserAgencyContext()
 
-  // 1. Fetch coordinator's assigned properties
+  // 1. Fetch coordinator's assigned properties (or all properties for agency owner)
   let propertiesQuery = supabase
     .from('properties')
     .select('id, name')
@@ -55,37 +55,75 @@ export default async function MaintenancePage() {
     .eq('agency_id', agencyId)
     .order('name', { ascending: true })
 
-  // 3. Fetch Tickets linked to coordinator's assigned properties
-  let ticketsQuery = supabase
-    .from('maintenance_tickets')
-    .select(`
-      id,
-      issue_description,
-      status,
-      created_at,
-      resolved_at,
-      cost,
-      image_url,
-      assigned_to,
-      unit_id,
-      units!inner (
+  // 3. Fetch Tickets linked to coordinator's assigned properties (or entire agency for owner)
+  let ticketList: any[] = []
+
+  if (role === 'property_manager') {
+    if (propertyIds.length === 0) {
+      // Coordinators with 0 assigned properties have no active tickets in their scope
+      ticketList = []
+    } else {
+      const { data: tickets, error: ticketsError } = await supabase
+        .from('maintenance_tickets')
+        .select(`
+          id,
+          issue_description,
+          status,
+          created_at,
+          resolved_at,
+          cost,
+          image_url,
+          assigned_to,
+          unit_id,
+          units!inner (
+            id,
+            unit_number,
+            property_id,
+            properties!inner ( id, name )
+          ),
+          tenants:tenants!maintenance_tickets_tenant_id_fkey ( first_name, last_name, phone_number ),
+          contractors ( id, name, specialty, phone_number )
+        `)
+        .eq('agency_id', agencyId)
+        .in('units.property_id', propertyIds)
+        .order('created_at', { ascending: false })
+
+      if (ticketsError) {
+        console.error('Error fetching maintenance tickets:', ticketsError)
+      }
+      ticketList = tickets || []
+    }
+  } else {
+    // Agency Owner: sees all tickets across the entire agency
+    const { data: tickets, error: ticketsError } = await supabase
+      .from('maintenance_tickets')
+      .select(`
         id,
-        unit_number,
-        property_id,
-        properties!inner ( id, name )
-      ),
-      tenants ( first_name, last_name, phone ),
-      contractors ( id, name, specialty, phone_number )
-    `)
-    .eq('agency_id', agencyId)
-    .order('created_at', { ascending: false })
+        issue_description,
+        status,
+        created_at,
+        resolved_at,
+        cost,
+        image_url,
+        assigned_to,
+        unit_id,
+        units!inner (
+          id,
+          unit_number,
+          property_id,
+          properties!inner ( id, name )
+        ),
+        tenants:tenants!maintenance_tickets_tenant_id_fkey ( first_name, last_name, phone_number ),
+        contractors ( id, name, specialty, phone_number )
+      `)
+      .eq('agency_id', agencyId)
+      .order('created_at', { ascending: false })
 
-  if (propertyIds.length > 0) {
-    ticketsQuery = ticketsQuery.in('units.property_id', propertyIds)
+    if (ticketsError) {
+      console.error('Error fetching maintenance tickets:', ticketsError)
+    }
+    ticketList = tickets || []
   }
-
-  const { data: tickets } = await ticketsQuery
-  const ticketList = tickets || []
 
   // 4. Calculate SLA metrics
   const now = Date.now()
@@ -95,17 +133,36 @@ export default async function MaintenancePage() {
     return ageInHours >= 48
   })
 
-  // 5. Fetch active leases for the Log Ticket Drawer
-  const { data: rawLeases } = await supabase
-    .from('leases')
-    .select(`
-      unit_id,
-      tenant_id,
-      tenants ( first_name, last_name ),
-      units ( unit_number, properties ( name ) )
-    `)
-    .eq('is_active', true)
-    .eq('agency_id', agencyId)
+  // 5. Fetch active leases for the Log Ticket Drawer (scoped to assigned properties for coordinators)
+  let rawLeases: any[] = []
+  if (role === 'property_manager') {
+    if (propertyIds.length > 0) {
+      const { data } = await supabase
+        .from('leases')
+        .select(`
+          unit_id,
+          tenant_id,
+          tenants ( first_name, last_name ),
+          units!inner ( unit_number, property_id, properties ( name ) )
+        `)
+        .eq('is_active', true)
+        .eq('agency_id', agencyId)
+        .in('units.property_id', propertyIds)
+      rawLeases = data || []
+    }
+  } else {
+    const { data } = await supabase
+      .from('leases')
+      .select(`
+        unit_id,
+        tenant_id,
+        tenants ( first_name, last_name ),
+        units ( unit_number, properties ( name ) )
+      `)
+      .eq('is_active', true)
+      .eq('agency_id', agencyId)
+    rawLeases = data || []
+  }
 
   const activeLeaseOptions = rawLeases?.map((l: any) => ({
     unit_id: l.unit_id,
@@ -229,6 +286,7 @@ export default async function MaintenancePage() {
               const ageHours = (now - new Date(ticket.created_at).getTime()) / (1000 * 60 * 60)
               const isSlaBreached = !isResolved && ageHours >= 48
               const duration = calculateDuration(ticket.created_at, ticket.resolved_at)
+              const tenantInfo = ticket.tenants || (ticket as any)['tenants!maintenance_tickets_tenant_id_fkey']
 
               return (
                 <div
@@ -259,61 +317,46 @@ export default async function MaintenancePage() {
                     <div className="flex flex-wrap items-center gap-2 shrink-0 self-start">
                       {/* Status Badges with color psychology */}
                       {isPending && (
-                        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-50 text-amber-700 border border-amber-200/60">
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-50 text-amber-800 border border-amber-200">
                           <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
-                          Pending
+                          Pending Review
                         </span>
                       )}
-
                       {isInProgress && (
-                        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-200/60">
-                          <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-200">
+                          <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" />
                           In Progress
                         </span>
                       )}
-
                       {isResolved && (
                         <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200/60">
                           <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                          Resolved
+                          Resolved ({duration})
                         </span>
                       )}
 
-                      {/* SLA Breach Visuals */}
+                      {/* 48h SLA Breach Badge */}
                       {isSlaBreached && (
-                        <span className="inline-flex items-center gap-1 text-xs font-bold px-2.5 py-0.5 rounded-full bg-rose-100 text-rose-700 border border-rose-200 animate-pulse">
-                          <span>🚨 SLA Breach ({Math.floor(ageHours)}h)</span>
-                        </span>
-                      )}
-
-                      {!isResolved && !isSlaBreached && (
-                        <span className="inline-flex items-center gap-1 text-xs font-medium px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-700 border border-slate-200">
-                          <span>⏱️ {Math.max(0, Math.floor(48 - ageHours))}h SLA remaining</span>
-                        </span>
-                      )}
-
-                      {isResolved && (
-                        <span className="inline-flex items-center gap-1 text-xs font-medium px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200/60">
-                          <span>✓ Resolved in {duration}</span>
+                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-rose-50 text-rose-700 border border-rose-200">
+                          <span>⚠️ SLA Breach ({Math.floor(ageHours)}h)</span>
                         </span>
                       )}
                     </div>
                   </div>
 
-                  {/* Photo Attachment preview if available */}
+                  {/* Photo Evidence (if uploaded) */}
                   {ticket.image_url && (
                     <div className="my-3">
                       <a
                         href={ticket.image_url}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="inline-block"
+                        className="inline-flex items-center gap-1.5 text-xs text-slate-600 hover:text-slate-900 font-semibold bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-lg hover:bg-slate-100 transition"
                       >
-                        <img
-                          src={ticket.image_url}
-                          alt="Maintenance issue evidence"
-                          className="max-h-48 rounded-lg border border-slate-200 object-cover hover:opacity-95 transition shadow-xs"
-                        />
+                        <svg className="w-4 h-4 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                        </svg>
+                        <span>View Attached Photo Evidence</span>
                       </a>
                     </div>
                   )}
@@ -323,10 +366,10 @@ export default async function MaintenancePage() {
                     <div>
                       <span className="text-slate-400 block text-[10px] uppercase font-semibold">Tenant</span>
                       <span className="font-semibold text-slate-900 mt-0.5 block">
-                        {ticket.tenants?.first_name ? `${ticket.tenants.first_name} ${ticket.tenants.last_name}` : 'Tenant'}
+                        {tenantInfo?.first_name ? `${tenantInfo.first_name} ${tenantInfo.last_name}` : 'Tenant'}
                       </span>
-                      {ticket.tenants?.phone && (
-                        <span className="text-[11px] text-slate-500 block">{ticket.tenants.phone}</span>
+                      {tenantInfo?.phone_number && (
+                        <span className="text-[11px] text-slate-500 block">{tenantInfo.phone_number}</span>
                       )}
                     </div>
 
@@ -399,8 +442,8 @@ export default async function MaintenancePage() {
                             defaultValue={ticket.assigned_to || ''}
                             className="w-full rounded-lg border border-slate-200 px-3 py-1.5 bg-white focus:bg-white text-xs text-slate-800"
                           >
-                            <option value="">-- No Contractor --</option>
-                            {contractors?.map((c: any) => (
+                            <option value="">-- Select Contractor --</option>
+                            {contractorOptions.map((c: any) => (
                               <option key={c.id} value={c.id}>
                                 {c.name} ({c.specialty})
                               </option>
@@ -411,38 +454,26 @@ export default async function MaintenancePage() {
                         {/* Cost Input */}
                         <div className="w-32">
                           <label className="block text-[10px] uppercase font-semibold text-slate-600 mb-1">
-                            Cost (KES)
+                            Repair Cost (KES)
                           </label>
                           <input
                             type="number"
                             name="cost"
                             step="0.01"
-                            min="0"
-                            defaultValue={ticket.cost || 0}
+                            defaultValue={ticket.cost || ''}
                             placeholder="0.00"
-                            className="w-full rounded-lg border border-slate-200 px-3 py-1.5 bg-white focus:bg-white text-xs font-mono font-bold text-slate-800 tabular-nums"
+                            className="w-full rounded-lg border border-slate-200 px-3 py-1.5 bg-white focus:bg-white text-xs text-slate-800 text-right tabular-nums"
                           />
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-2 self-end sm:self-auto shrink-0 pt-2 sm:pt-0">
-                        <button
-                          type="submit"
-                          className="bg-slate-900 hover:bg-slate-800 text-white font-semibold px-4 py-2 rounded-lg transition text-xs shadow-xs"
-                        >
-                          Update Work Order
-                        </button>
-
-                        {!isResolved && (
-                          <button
-                            type="submit"
-                            formAction={resolveTicket}
-                            className="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold px-3.5 py-2 rounded-lg transition text-xs shadow-xs flex items-center gap-1"
-                          >
-                            <span>✓ Resolve</span>
-                          </button>
-                        )}
-                      </div>
+                      {/* Save Changes CTA Button */}
+                      <button
+                        type="submit"
+                        className="bg-slate-900 hover:bg-slate-800 text-white font-semibold px-4 py-2 rounded-lg cursor-pointer transition-all duration-200 ease-in-out self-end sm:self-center shadow-xs"
+                      >
+                        Update Ticket
+                      </button>
                     </form>
                   </div>
                 </div>
@@ -451,36 +482,31 @@ export default async function MaintenancePage() {
           )}
         </div>
 
-        {/* Right Column: Contractor Directory & Quick Contacts */}
-        <div>
-          <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 sticky top-20">
-            <div className="flex justify-between items-center pb-3 mb-3 border-b border-slate-100">
-              <h2 className="text-base font-bold text-slate-900">Contractor Network</h2>
+        {/* Right Column: Contractor Roster Mini-Ledger */}
+        <div className="space-y-6">
+          <div className="bg-white shadow-sm border border-slate-200 rounded-xl p-6">
+            <div className="flex items-center justify-between pb-4 border-b border-slate-100 mb-4">
+              <div>
+                <h2 className="text-base font-bold text-slate-900">Contractor Network</h2>
+                <p className="text-xs text-slate-500">Verified trade partners for dispatch.</p>
+              </div>
               <AddContractorButton />
             </div>
 
-            {!contractors || contractors.length === 0 ? (
-              <p className="text-slate-400 italic text-xs py-4 text-center">
-                No contractors registered yet. Add electricians, plumbers, and technicians.
-              </p>
+            {contractors?.length === 0 ? (
+              <p className="text-xs text-slate-400 italic">No contractors registered yet.</p>
             ) : (
-              <ul className="divide-y divide-slate-100 max-h-[520px] overflow-y-auto">
-                {contractors.map((c: any) => (
-                  <li key={c.id} className="py-3 first:pt-0 last:pb-0 text-xs">
-                    <div className="flex justify-between items-start">
-                      <p className="font-bold text-slate-900">{c.name}</p>
-                      <span className="text-[10px] font-semibold uppercase px-2 py-0.5 rounded bg-slate-100 text-slate-700">
-                        {c.specialty}
-                      </span>
+              <ul className="divide-y divide-slate-100 text-xs">
+                {contractors?.map((contractor: any) => (
+                  <li key={contractor.id} className="py-3 flex items-center justify-between">
+                    <div>
+                      <p className="font-semibold text-slate-900">{contractor.name}</p>
+                      <span className="text-[11px] text-slate-500">{contractor.specialty}</span>
                     </div>
-                    {c.phone_number && (
-                      <p className="text-slate-500 mt-1 flex items-center gap-1">
-                        <span>📞</span>
-                        <span className="font-mono">{c.phone_number}</span>
-                      </p>
-                    )}
-                    {c.email && (
-                      <p className="text-slate-400 text-[11px] truncate mt-0.5">{c.email}</p>
+                    {contractor.phone_number && (
+                      <span className="text-slate-600 font-mono text-[11px] bg-slate-50 px-2 py-1 rounded border border-slate-200">
+                        {contractor.phone_number}
+                      </span>
                     )}
                   </li>
                 ))}

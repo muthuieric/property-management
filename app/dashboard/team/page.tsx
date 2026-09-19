@@ -106,13 +106,18 @@ export default async function TeamPage({
   // 4. Fetch recent assignment logs for the Audit Trail
   let assignmentLogs: any[] = []
   try {
-    const { data: logs } = await supabase
+    const { data: logs, error: logsError } = await supabase
       .from('assignment_logs')
       .select('id, property_id, changed_by, old_manager_id, new_manager_id, created_at')
       .eq('agency_id', agencyId)
       .order('created_at', { ascending: false })
-      .limit(10)
-    assignmentLogs = logs || []
+      .limit(25)
+
+    if (logsError) {
+      console.error('Error querying assignment_logs:', logsError)
+    } else {
+      assignmentLogs = logs || []
+    }
   } catch (err) {
     console.warn('Could not query assignment_logs (table may not exist yet):', err)
   }
@@ -374,9 +379,13 @@ export default async function TeamPage({
                   <tbody className="divide-y divide-slate-100">
                     {assignmentLogs.map((log) => {
                       const propName = propertyNameMap.get(log.property_id) || 'Property'
-                      const changedByName = profileNameMap.get(log.changed_by) || 'Agency Owner'
-                      const oldManagerName = log.old_manager_id ? profileNameMap.get(log.old_manager_id) : 'None (Unassigned)'
-                      const newManagerName = log.new_manager_id ? profileNameMap.get(log.new_manager_id) : 'Unassigned'
+                      const changedByName = profileNameMap.get(log.changed_by) || (log.changed_by ? `Admin (${log.changed_by.slice(0, 8)})` : 'Agency Owner')
+                      const oldManagerName = log.old_manager_id 
+                        ? (profileNameMap.get(log.old_manager_id) || `Coordinator (${log.old_manager_id.slice(0, 8)})`) 
+                        : 'None (Unassigned)'
+                      const newManagerName = log.new_manager_id 
+                        ? (profileNameMap.get(log.new_manager_id) || `Coordinator (${log.new_manager_id.slice(0, 8)})`) 
+                        : 'Unassigned'
 
                       return (
                         <tr key={log.id} className="hover:bg-slate-50/60 transition-all duration-150">

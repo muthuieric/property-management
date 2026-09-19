@@ -8,7 +8,12 @@ import { getUserAgencyContext } from '@/utils/supabase/get-context'
 
 export async function addTransaction(formData: FormData) {
   const supabase = await createClient()
-  const { agencyId } = await getUserAgencyContext()
+  const { agencyId, role } = await getUserAgencyContext()
+
+  // Security Gate: Only Agency Owners can record ledger transactions
+  if (role !== 'agency_owner') {
+    redirect('/dashboard/financials?message=Unauthorized: Only agency owners can record transactions')
+  }
 
   const transaction_type = formData.get('transaction_type') as string // 'income' or 'expense'
   const rawAmount = formData.get('amount') as string
@@ -48,7 +53,12 @@ export async function addTransaction(formData: FormData) {
 
 export async function deleteTransaction(formData: FormData) {
   const supabase = await createClient()
-  const { agencyId } = await getUserAgencyContext()
+  const { agencyId, role } = await getUserAgencyContext()
+
+  // Security Gate: Only Agency Owners can delete ledger transactions
+  if (role !== 'agency_owner') {
+    redirect('/dashboard/financials?message=Unauthorized: Only agency owners can delete transactions')
+  }
 
   const id = formData.get('id') as string
 

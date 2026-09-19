@@ -8,10 +8,11 @@ import ActiveLeasesSection from './components/ActiveLeasesSection'
 export default async function CoordinatorClearancePage({
   searchParams,
 }: {
-  searchParams: Promise<{ message?: string }>
+  searchParams: Promise<{ message?: string; property_id?: string }>
 }) {
   const resolvedSearchParams = await searchParams
   const message = resolvedSearchParams.message
+  const selectedPropertyId = resolvedSearchParams.property_id || ''
 
   const supabase = await createClient()
   const { userId, agencyId, role } = await getUserAgencyContext()
@@ -19,7 +20,7 @@ export default async function CoordinatorClearancePage({
   // 1. Fetch coordinator's assigned properties
   let propertiesQuery = supabase
     .from('properties')
-    .select('id, name')
+    .select('id, name, location')
     .eq('agency_id', agencyId)
 
   if (role === 'property_manager') {
@@ -32,14 +33,17 @@ export default async function CoordinatorClearancePage({
   if (role === 'agency_owner' && assignedProperties.length === 0) {
     const { data: allProps } = await supabase
       .from('properties')
-      .select('id, name')
+      .select('id, name, location')
       .eq('agency_id', agencyId)
     assignedProperties = allProps || []
   }
 
-  const propertyIds = assignedProperties.map((p) => p.id)
+  const allPropertyIds = assignedProperties.map((p) => p.id)
+  const targetPropertyIds = selectedPropertyId
+    ? [selectedPropertyId]
+    : allPropertyIds
 
-  // 2. Fetch active leases in coordinator's assigned properties
+  // 2. Fetch active leases in targeted properties
   let leasesQuery = supabase
     .from('leases')
     .select(`
@@ -47,6 +51,7 @@ export default async function CoordinatorClearancePage({
       start_date,
       end_date,
       deposit_amount,
+      deposit_months,
       is_active,
       tenant_id,
       unit_id,
@@ -55,16 +60,16 @@ export default async function CoordinatorClearancePage({
         unit_number,
         base_rent,
         property_id,
-        properties!inner ( id, name )
+        properties!inner ( id, name, location )
       ),
-      tenants ( id, first_name, last_name, email, phone )
+      tenants ( id, first_name, last_name, email, phone_number )
     `)
     .eq('agency_id', agencyId)
     .eq('is_active', true)
     .order('start_date', { ascending: false })
 
-  if (propertyIds.length > 0) {
-    leasesQuery = leasesQuery.in('units.property_id', propertyIds)
+  if (targetPropertyIds.length > 0) {
+    leasesQuery = leasesQuery.in('units.property_id', targetPropertyIds)
   }
 
   const { data: activeLeases } = await leasesQuery
@@ -83,7 +88,7 @@ export default async function CoordinatorClearancePage({
     tenantTransactions = txs || []
   }
 
-  // 4. Fetch open maintenance tickets for units to allow linking deductions to documented tickets
+  // 4. Fetch open maintenance tickets for units
   const unitIds = leasesList.map((l: any) => l.unit_id).filter(Boolean)
   let unitTickets: any[] = []
   if (unitIds.length > 0) {
@@ -119,7 +124,6 @@ export default async function CoordinatorClearancePage({
   }))
 
   const currentMonth = new Date().toLocaleString('en-US', { month: 'long', year: 'numeric' })
-  const defaultWaterDescription = `Monthly Water Utility Bill - ${currentMonth}`
   const isSuccess = message && message.toLowerCase().includes('success')
 
   const totalEscrowDeposits = leasesList.reduce(
@@ -127,6 +131,9 @@ export default async function CoordinatorClearancePage({
     0
   )
   const totalArrears = Array.from(tenantBalanceMap.values()).reduce((sum, v) => sum + v, 0)
+
+  const activePropertyName =
+    assignedProperties.find((p) => p.id === selectedPropertyId)?.name || 'All Assigned Sites'
 
   return (
     <div className="p-4 md:p-8 text-slate-900 w-full max-w-7xl mx-auto space-y-8">
@@ -145,7 +152,7 @@ export default async function CoordinatorClearancePage({
             Utility Billing & Move-Out Clearance
           </h1>
           <p className="text-sm text-slate-500 mt-1">
-            Batch-bill monthly utility meters, reconcile deposit escrow, and execute tenant turnover clearances.
+            Site-level water tabulation (Kannan, Nirkav, Joshi, Prosper), meter reading ledger, and verified tenant turnover.
           </p>
         </div>
 
@@ -155,6 +162,13 @@ export default async function CoordinatorClearancePage({
             className="border border-slate-300 bg-white text-slate-700 hover:text-slate-900 hover:bg-slate-100 px-4 py-2 rounded-xl transition-all duration-200 ease-in-out font-semibold text-xs shadow-xs cursor-pointer inline-flex items-center gap-1.5"
           >
             <span>&larr; Action Center</span>
+          </Link>
+          <Link
+            href="/dashboard/deposits"
+            className="bg-slate-900 hover:bg-slate-800 text-white px-4 py-2 rounded-xl transition-all duration-200 ease-in-out font-bold text-xs shadow-xs cursor-pointer inline-flex items-center gap-1.5"
+          >
+            <span>Deposit Escrow Vault</span>
+            <span>&rarr;</span>
           </Link>
         </div>
       </header>
@@ -172,26 +186,69 @@ export default async function CoordinatorClearancePage({
         </div>
       )}
 
+      {/* SITE-SPECIFIC FILTER TABS (Kannan, Nirkav, Joshi, Prosper) */}
+      <div className="flex items-center gap-2 overflow-x-auto pb-1 border-b border-slate-200">
+        <span className="text-xs font-bold uppercase tracking-wider text-slate-500 mr-2 shrink-0">
+          Target Site:
+        </span>
+        <Link
+          href="/dashboard/clearance"
+          className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all shrink-0 cursor-pointer ${
+            !selectedPropertyId
+              ? 'bg-slate-900 text-white shadow-xs'
+              : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
+          }`}
+        >
+          All Sites ({assignedProperties.length})
+        </Link>
+        {assignedProperties.map((p) => {
+          const isSelected = selectedPropertyId === p.id
+          const isProsper = p.name.toLowerCase().includes('prosper')
+          return (
+            <Link
+              key={p.id}
+              href={`/dashboard/clearance?property_id=${p.id}`}
+              className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all shrink-0 cursor-pointer flex items-center gap-1.5 ${
+                isSelected
+                  ? 'bg-slate-900 text-white shadow-xs'
+                  : isProsper
+                  ? 'bg-amber-50 text-amber-900 hover:bg-amber-100 border border-amber-300'
+                  : 'bg-white text-slate-700 hover:bg-slate-100 border border-slate-200'
+              }`}
+            >
+              <span>{p.name}</span>
+              {isProsper && (
+                <span className="text-[9px] uppercase px-1 py-0.2 rounded bg-amber-200 text-amber-950 font-bold">
+                  Priority
+                </span>
+              )}
+            </Link>
+          )
+        })}
+      </div>
+
       {/* QUICK KPI SUMMARY CARDS */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
         <div className="bg-white shadow-sm border border-slate-200 rounded-xl p-6">
           <span className="text-xs font-semibold uppercase tracking-wider text-slate-500 block mb-1">
-            Active Leases
+            Active Leases in Scope
           </span>
           <p className="text-3xl font-bold text-slate-900 tabular-nums tracking-tight">
             {leasesList.length}
           </p>
-          <span className="text-xs text-slate-400 mt-1 block">Tenants eligible for billing</span>
+          <span className="text-xs text-slate-400 mt-1 block">
+            {activePropertyName} &bull; Eligible for utility tabulation
+          </span>
         </div>
 
         <div className="bg-white shadow-sm border border-slate-200 rounded-xl p-6">
           <span className="text-xs font-semibold uppercase tracking-wider text-emerald-700 block mb-1">
-            Total Funds in Escrow
+            Escrow Held in Trust
           </span>
           <p className="text-3xl font-bold text-emerald-800 tabular-nums tracking-tight">
             KES {totalEscrowDeposits.toLocaleString('en-US', { minimumFractionDigits: 2 })}
           </p>
-          <span className="text-xs text-slate-400 mt-1 block">Locked security deposits</span>
+          <span className="text-xs text-slate-400 mt-1 block">Locked refundable security collateral</span>
         </div>
 
         <div className="bg-white shadow-sm border border-slate-200 rounded-xl p-6">
@@ -201,48 +258,46 @@ export default async function CoordinatorClearancePage({
           <p className="text-3xl font-bold text-amber-800 tabular-nums tracking-tight">
             KES {totalArrears.toLocaleString('en-US', { minimumFractionDigits: 2 })}
           </p>
-          <span className="text-xs text-amber-700 mt-1 block font-medium">Unpaid rent & utility expenses</span>
+          <span className="text-xs text-amber-700 mt-1 block font-medium">Unpaid rent & water meter arrears</span>
         </div>
       </div>
 
-      {/* CARD 1: BATCH UTILITY BILLING */}
+      {/* CARD 1: SITE-SPECIFIC MONTHLY WATER METER TABULATION */}
       <section className="bg-white shadow-sm border border-slate-200 rounded-xl p-6">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-5 border-b border-slate-100">
           <div>
             <div className="flex items-center gap-2">
-              <span className="p-1.5 bg-slate-100 text-slate-800 rounded-lg text-xs">
-                <svg className="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" />
-                </svg>
+              <span className="p-1.5 bg-blue-50 text-blue-800 border border-blue-200 rounded-lg text-xs font-bold">
+                Water Utility Tabulation
               </span>
               <h2 className="text-lg font-bold text-slate-900 tracking-tight">
-                Batch Utility Billing
+                Monthly Meter Readings & Billing
               </h2>
             </div>
             <p className="text-xs text-slate-500 mt-1">
-              Tabulate monthly water consumption. Submitting immediately records an expense against the tenant&apos;s ledger.
+              Tabulate water consumption for {activePropertyName}. Entering meter readings auto-computes consumption and records an auditable utility debit.
             </p>
           </div>
-          <span className="text-xs font-semibold px-3 py-1 rounded-full bg-blue-50 text-blue-800 border border-blue-200 shrink-0 self-start sm:self-auto">
-            Billing Period: {currentMonth}
-          </span>
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-semibold px-3 py-1 rounded-full bg-blue-50 text-blue-800 border border-blue-200 shrink-0">
+              Billing Month: {currentMonth}
+            </span>
+          </div>
         </div>
 
         {leasesList.length === 0 ? (
           <div className="py-12 text-center text-xs text-slate-400 italic">
-            No active leases found eligible for utility billing.
+            No active leases found for {activePropertyName}.
           </div>
         ) : (
           <div className="overflow-x-auto mt-4">
             <table className="w-full text-left border-collapse text-xs">
               <thead>
-                <tr className="bg-slate-50 border-y border-slate-200 font-semibold text-slate-600 uppercase tracking-wider text-[11px]">
-                  <th className="py-3 px-4">Tenant</th>
+                <tr className="bg-slate-50 border-y border-slate-200 font-semibold text-slate-600 uppercase tracking-wider text-[10px]">
+                  <th className="py-3 px-4">Resident</th>
                   <th className="py-3 px-4">Property & Unit</th>
                   <th className="py-3 px-4 text-right">Current Arrears</th>
-                  <th className="py-3 px-4 text-right w-36">Water Bill (KES)</th>
-                  <th className="py-3 px-4">Billing Description</th>
-                  <th className="py-3 px-4 text-right w-28">Action</th>
+                  <th className="py-3 px-4">Meter Tabulation ($m^3$) & Post Bill</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -255,22 +310,24 @@ export default async function CoordinatorClearancePage({
 
                   return (
                     <tr key={`water-${lease.id}`} className="hover:bg-slate-50/70 transition-colors">
-                      {/* Tenant */}
+                      {/* Resident */}
                       <td className="py-3.5 px-4 whitespace-nowrap">
                         <p className="font-bold text-slate-900 text-sm">{tenantName}</p>
-                        <p className="text-slate-500 text-[11px] mt-0.5">
-                          {tenant?.phone || tenant?.email || 'No contact on file'}
+                        <p className="text-slate-500 text-[11px] mt-0.5 font-mono">
+                          {tenant?.phone_number || tenant?.email || 'No contact on file'}
                         </p>
                       </td>
 
                       {/* Property & Unit */}
                       <td className="py-3.5 px-4 whitespace-nowrap">
                         <p className="font-semibold text-slate-800">
-                          {lease.units?.properties?.name || 'Assigned Property'}
+                          {lease.units?.properties?.name || 'Property'}
                         </p>
-                        <p className="text-slate-500 text-[11px] mt-0.5">
-                          Unit #{lease.units?.unit_number}
-                        </p>
+                        <div className="flex items-center gap-1.5 mt-0.5">
+                          <span className="text-[11px] text-slate-600 font-bold">
+                            Unit #{lease.units?.unit_number}
+                          </span>
+                        </div>
                       </td>
 
                       {/* Current Arrears */}
@@ -283,15 +340,15 @@ export default async function CoordinatorClearancePage({
                           KES {currentDues.toLocaleString('en-US', { minimumFractionDigits: 2 })}
                         </span>
                         <span className="text-[10px] text-slate-400 block mt-0.5">
-                          {currentDues > 0 ? 'Arrears pending' : 'Zero balance'}
+                          {currentDues > 0 ? 'Pending dues' : 'Settled'}
                         </span>
                       </td>
 
-                      {/* Spreadsheet Inputs Form spanning Amount, Description, Action */}
-                      <td colSpan={3} className="py-3.5 px-4">
+                      {/* Meter Tabulation Spreadsheet Form */}
+                      <td className="py-3.5 px-4">
                         <form
                           action={postWaterBill}
-                          className="flex items-center gap-3 w-full"
+                          className="flex flex-wrap items-center gap-2.5"
                         >
                           <input type="hidden" name="lease_id" value={lease.id} />
                           <input type="hidden" name="tenant_id" value={lease.tenant_id} />
@@ -299,42 +356,65 @@ export default async function CoordinatorClearancePage({
                           <input
                             type="hidden"
                             name="property_id"
-                            value={lease.units?.properties?.id || lease.units?.property_id || ''}
+                            value={lease.units?.properties?.id || selectedPropertyId || ''}
                           />
 
-                          {/* Water Bill Amount (KES) */}
-                          <div className="w-36 shrink-0 relative">
-                            <input
-                              type="number"
-                              name="amount"
-                              step="0.01"
-                              min="1"
-                              required
-                              placeholder="0.00"
-                              className="w-full text-right text-xs font-semibold tabular-nums rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-slate-900 placeholder-slate-400 focus:ring-2 focus:ring-slate-900 focus:outline-none focus:border-slate-900 transition"
-                            />
+                          <div className="flex items-center gap-1.5">
+                            <div>
+                              <span className="text-[9px] uppercase font-bold text-slate-400 block">Prev</span>
+                              <input
+                                type="number"
+                                step="any"
+                                min="0"
+                                name="previous_reading"
+                                placeholder="Prev m³"
+                                className="w-20 px-2 py-1 border border-slate-200 rounded-lg text-right font-mono text-xs"
+                              />
+                            </div>
+
+                            <div>
+                              <span className="text-[9px] uppercase font-bold text-slate-400 block">Curr</span>
+                              <input
+                                type="number"
+                                step="any"
+                                min="0"
+                                name="current_reading"
+                                placeholder="Curr m³"
+                                className="w-20 px-2 py-1 border border-slate-200 rounded-lg text-right font-mono text-xs"
+                              />
+                            </div>
+
+                            <div>
+                              <span className="text-[9px] uppercase font-bold text-slate-400 block">Rate</span>
+                              <input
+                                type="number"
+                                step="any"
+                                min="0"
+                                name="rate_per_unit"
+                                defaultValue="150"
+                                className="w-16 px-2 py-1 border border-slate-200 rounded-lg text-right font-mono text-xs"
+                              />
+                            </div>
+
+                            <div>
+                              <span className="text-[9px] uppercase font-bold text-slate-400 block">Or Total (KES)</span>
+                              <input
+                                type="number"
+                                step="any"
+                                min="0"
+                                name="amount"
+                                placeholder="KES Bill"
+                                className="w-24 px-2 py-1 border border-slate-200 rounded-lg text-right font-bold tabular-nums text-xs"
+                              />
+                            </div>
                           </div>
 
-                          {/* Billing Description */}
-                          <div className="flex-1">
-                            <input
-                              type="text"
-                              name="description"
-                              defaultValue={defaultWaterDescription}
-                              required
-                              className="w-full text-xs rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-slate-800 placeholder-slate-400 focus:ring-2 focus:ring-slate-900 focus:outline-none focus:border-slate-900 transition"
-                            />
-                          </div>
-
-                          {/* Post Bill Submit Button */}
-                          <div className="shrink-0">
-                            <button
-                              type="submit"
-                              className="inline-flex items-center justify-center px-3.5 py-1.5 rounded-lg text-xs font-semibold bg-white border border-slate-300 text-slate-800 hover:bg-slate-100 hover:border-slate-400 cursor-pointer transition-all duration-200 ease-in-out shadow-xs whitespace-nowrap"
-                            >
-                              Post Bill
-                            </button>
-                          </div>
+                          <button
+                            type="submit"
+                            className="bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs px-3.5 py-1.5 rounded-lg shadow-xs cursor-pointer transition-all duration-150 self-end"
+                          >
+                            Post Bill
+                          </button>
                         </form>
                       </td>
                     </tr>
@@ -346,7 +426,7 @@ export default async function CoordinatorClearancePage({
         )}
       </section>
 
-      {/* CARD 2: ACTIVE LEASES (MOVE-OUT INITIATION) */}
+      {/* CARD 2: MOVE-OUT CLEARANCE & DEPOSIT TURNOVER SECTION */}
       <ActiveLeasesSection
         leases={leasesWithUnpaidDues}
         unitTickets={unitTickets}

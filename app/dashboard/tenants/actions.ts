@@ -1,45 +1,185 @@
 'use server'
 
 import { revalidatePath } from 'next/cache'
-import { createClient } from '@/utils/supabase/server'
+import { createClient as createServerClient } from '@/utils/supabase/server'
+import { createClient as createAdminClient } from '@supabase/supabase-js'
 import { getUserAgencyContext } from '@/utils/supabase/get-context'
 
-export async function addTenant(formData: FormData) {
+export interface AddTenantResult {
+  success: boolean
+  error?: string
+}
+
+export async function addTenant(formData: FormData): Promise<AddTenantResult> {
+  // Verify service key credentials early
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY
+
+  if (!supabaseUrl || !serviceRoleKey) {
+    return {
+      success: false,
+      error: 'Missing Supabase Service Role credentials. Please configure SUPABASE_SERVICE_ROLE_KEY.',
+    }
+  }
+
+  const supabaseAdmin = createAdminClient(supabaseUrl, serviceRoleKey, {
+    auth: {
+      autoRefreshToken: false,
+      persistSession: false,
+    },
+  })
+
+  // 1. Fetch the logged-in user and their agency_id from their profiles record
+  let agencyId: string | null = null
   try {
-    const supabase = await createClient()
-    const { agencyId } = await getUserAgencyContext()
+    const supabase = await createServerClient()
+    const { data: { user }, error: authUserError } = await supabase.auth.getUser()
 
-    const first_name = formData.get('first_name') as string
-    const last_name = formData.get('last_name') as string
-    const email = formData.get('email') as string
-    const phone_number = formData.get('phone_number') as string
-
-    if (!first_name || !last_name || !email || !phone_number) {
-      return { success: false, error: 'All fields are required.' }
+    if (authUserError || !user) {
+      return { success: false, error: 'Unauthorized: Active user session not found. Please log in.' }
     }
 
-    const { error } = await supabase
-      .from('tenants')
-      .insert([
-        { 
-          first_name, 
-          last_name, 
-          email, 
-          phone_number,
+    const { data: profileRecord, error: profileFetchErr } = await supabaseAdmin
+      .from('profiles')
+      .select('agency_id')
+      .eq('id', user.id)
+      .single()
+
+    agencyId = profileRecord?.agency_id || null
+
+    if (!agencyId) {
+      const ctx = await getUserAgencyContext()
+      agencyId = ctx.agencyId || null
+    }
+  } catch (authContextErr: any) {
+    console.error('Error resolving agency context:', authContextErr)
+    return { success: false, error: authContextErr?.message || 'Failed to resolve agency context.' }
+  }
+
+  if (!agencyId) {
+    return { success: false, error: 'Could not resolve agency context for the current user.' }
+  }
+
+  // 2. Validate form fields
+  const first_name = (formData.get('first_name') as string)?.trim()
+  const last_name = (formData.get('last_name') as string)?.trim()
+  const email = (formData.get('email') as string)?.trim().toLowerCase()
+  const phone_number = (formData.get('phone_number') as string)?.trim()
+  const rawPassword = (formData.get('password') as string)?.trim()
+  const password = rawPassword || 'TenantPass2026!'
+
+  if (!first_name) {
+    return { success: false, error: 'First name is required.' }
+  }
+  if (!last_name) {
+    return { success: false, error: 'Last name is required.' }
+  }
+  if (!email) {
+    return { success: false, error: 'Email address is required.' }
+  }
+  if (!phone_number) {
+    return { success: false, error: 'Phone number is required.' }
+  }
+
+  // 3. Strict try/catch wrapping createUser and database insert logic
+  let newUserId: string | null = null
+
+  try {
+    // 3a. Create auth user via Supabase Admin API
+    const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
+      email,
+      password,
+      email_confirm: true,
+      user_metadata: {
+        first_name,
+        last_name,
+        role: 'tenant',
+        agency_id: agencyId,
+      },
+    })
+
+    if (authError) {
+      console.error('supabaseAdmin.auth.admin.createUser error:', authError)
+      return { success: false, error: authError.message }
+    }
+
+    if (!authData?.user?.id) {
+      return { success: false, error: 'Failed to generate user identifier from auth service.' }
+    }
+
+    newUserId = authData.user.id
+
+    // 3b. Insert/Upsert into profiles table explicitly including agency_id
+    const { error: profileError } = await supabaseAdmin
+      .from('profiles')
+      .upsert([
+        {
+          id: newUserId,
           agency_id: agencyId,
-          is_active: true
-        }
+          role: 'tenant',
+          first_name,
+          last_name,
+          is_active: true,
+        },
       ])
 
-    if (error) {
-      console.error('Error adding tenant:', error)
-      return { success: false, error: error.message || 'Error creating tenant record' }
+    if (profileError) {
+      console.error('Database insert into profiles failed:', profileError)
+      // Rollback created auth user
+      try {
+        await supabaseAdmin.auth.admin.deleteUser(newUserId)
+      } catch {}
+      return { success: false, error: profileError.message }
     }
 
-    revalidatePath('/dashboard/tenants')
-    return { success: true }
+    // 3c. Insert into tenants table explicitly including agency_id
+    const { error: tenantError } = await supabaseAdmin
+      .from('tenants')
+      .insert([
+        {
+          id: newUserId,
+          user_id: newUserId,
+          first_name,
+          last_name,
+          email,
+          phone_number,
+          agency_id: agencyId,
+          is_active: true,
+        },
+      ])
+
+    if (tenantError) {
+      console.error('Database insert into tenants failed:', tenantError)
+      // Rollback profile and auth user
+      try {
+        await supabaseAdmin.from('profiles').delete().eq('id', newUserId)
+      } catch {}
+      try {
+        await supabaseAdmin.auth.admin.deleteUser(newUserId)
+      } catch {}
+      return { success: false, error: tenantError.message }
+    }
   } catch (err: any) {
-    console.error('addTenant action error:', err)
-    return { success: false, error: err.message || 'Unexpected server error' }
+    console.error('Unhandled exception during tenant registration:', err)
+    if (newUserId) {
+      try {
+        await supabaseAdmin.from('profiles').delete().eq('id', newUserId)
+      } catch {}
+      try {
+        await supabaseAdmin.auth.admin.deleteUser(newUserId)
+      } catch {}
+    }
+    return { success: false, error: err?.message || 'An unexpected error occurred while registering the tenant.' }
   }
+
+  // 4. Invalidate Next.js cache across all relevant views
+  try {
+    revalidatePath('/dashboard/tenants')
+    revalidatePath('/dashboard/property/[id]', 'page')
+    revalidatePath('/dashboard')
+  } catch (cacheErr: any) {
+    console.warn('Cache revalidation warning:', cacheErr)
+  }
+
+  return { success: true }
 }

@@ -1,7 +1,9 @@
 // app/dashboard/financials/page.tsx
 import { createClient } from '@/utils/supabase/server'
 import { getUserAgencyContext } from '@/utils/supabase/get-context'
+import { redirect } from 'next/navigation'
 import { addTransaction, deleteTransaction } from './actions'
+import ExportReportButton, { RentReportData } from '@/app/dashboard/components/ExportReportButton'
 
 export default async function FinancialsPage({
   searchParams,
@@ -12,9 +14,21 @@ export default async function FinancialsPage({
   const message = resolvedSearchParams.message
 
   const supabase = await createClient()
-  const { agencyId } = await getUserAgencyContext()
+  const { agencyId, role } = await getUserAgencyContext()
 
-  // 1. Fetch properties for dropdown and label mapping
+  // Strict Access Control: Financial ledger is reserved for Agency Owner
+  if (role !== 'agency_owner') {
+    redirect('/dashboard?message=Access restricted: Global financials are reserved for Agency Owners.')
+  }
+
+  // 1. Fetch agency profile for report header
+  const { data: agencyData } = await supabase
+    .from('agencies')
+    .select('name')
+    .eq('id', agencyId)
+    .single()
+
+  // 2. Fetch properties for dropdown and label mapping
   const { data: properties } = await supabase
     .from('properties')
     .select('id, name')
@@ -26,12 +40,14 @@ export default async function FinancialsPage({
     propertyMap.set(p.id, p.name)
   })
 
-  // 2. Fetch all historical transactions
+  // 3. Fetch all historical transactions
   const { data: transactions } = await supabase
     .from('transactions')
     .select(`
       id,
       property_id,
+      unit_id,
+      tenant_id,
       transaction_type,
       amount,
       transaction_date,
@@ -42,7 +58,38 @@ export default async function FinancialsPage({
 
   const transactionList = transactions || []
 
-  // 3. Calculate summary metrics
+  // 4. Fetch active leases and occupants for billing cycle reconciliation
+  const { data: activeLeasesData } = await supabase
+    .from('leases')
+    .select(`
+      id,
+      unit_id,
+      tenant_id,
+      deposit_amount,
+      start_date,
+      end_date,
+      is_active,
+      units (
+        id,
+        unit_number,
+        base_rent,
+        property_id,
+        properties ( id, name )
+      ),
+      tenants (
+        id,
+        first_name,
+        last_name,
+        phone_number,
+        email
+      )
+    `)
+    .eq('agency_id', agencyId)
+    .eq('is_active', true)
+
+  const activeLeases = activeLeasesData || []
+
+  // 5. Calculate summary metrics for ledger
   const totalIncome = transactionList
     .filter((t) => ['income', 'payment'].includes(t.transaction_type))
     .reduce((sum, t) => sum + Number(t.amount || 0), 0)
@@ -54,6 +101,135 @@ export default async function FinancialsPage({
   const netProfit = totalIncome - totalExpenses
   const todayDate = new Date().toISOString().split('T')[0]
   const isSuccess = message && message.toLowerCase().includes('success')
+
+  // 6. Compute Real Estate Rent Payment Summary Report (Current Billing Period)
+  const now = new Date()
+  const currentMonthName = now.toLocaleString('en-US', { month: 'long', year: 'numeric' })
+  const startOfMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`
+
+  // Filter income payments recorded in current billing month
+  const currentPeriodIncome = transactionList.filter((t) => {
+    const isIncome = ['income', 'payment'].includes(t.transaction_type)
+    const isThisPeriod = t.transaction_date && t.transaction_date >= startOfMonth
+    return isIncome && isThisPeriod
+  })
+
+  // Map and reconcile transactions against leases
+  const matchedTxIds = new Set<string>()
+
+  const unpaidTenants: RentReportData['unpaidTenants'] = []
+  const partialPayments: RentReportData['partialPayments'] = []
+  const paidOverpaid: RentReportData['paidOverpaid'] = []
+
+  activeLeases.forEach((lease: any) => {
+    const tenant = lease.tenants
+    const unit = lease.units
+    const property = unit?.properties
+    const tenantName = tenant
+      ? `${tenant.first_name || ''} ${tenant.last_name || ''}`.trim()
+      : 'Unnamed Occupant'
+    const unitNumber = unit?.unit_number ? `Unit ${unit.unit_number}` : 'Unassigned Unit'
+    const propertyName = property?.name || 'Property Site'
+    const phone = tenant?.phone_number || ''
+    const expectedRent = Number(unit?.base_rent || 0)
+
+    // Match criteria: explicit tenant_id, unit_id, or description heuristic
+    const matchedTxs = currentPeriodIncome.filter((t) => {
+      if (matchedTxIds.has(t.id)) return false
+      if (t.tenant_id && lease.tenant_id && t.tenant_id === lease.tenant_id) return true
+      if (t.unit_id && lease.unit_id && t.unit_id === lease.unit_id) return true
+      if (t.description) {
+        const desc = t.description.toLowerCase()
+        if (tenantName.length > 2 && desc.includes(tenantName.toLowerCase())) return true
+        if (unit?.unit_number && desc.includes(`unit ${unit.unit_number.toLowerCase()}`)) return true
+      }
+      return false
+    })
+
+    matchedTxs.forEach((t) => matchedTxIds.add(t.id))
+
+    const paidAmount = matchedTxs.reduce((sum, t) => sum + Number(t.amount || 0), 0)
+    const txCodes = matchedTxs
+      .map((t) => (t.id ? `TX-${t.id.slice(0, 8).toUpperCase()}` : 'TX-PAID'))
+      .join(', ')
+
+    if (paidAmount === 0) {
+      unpaidTenants.push({
+        name: tenantName,
+        unit: unitNumber,
+        property: propertyName,
+        phone,
+        expectedRent,
+        amountDue: expectedRent,
+      })
+    } else if (paidAmount < expectedRent) {
+      partialPayments.push({
+        name: tenantName,
+        unit: unitNumber,
+        property: propertyName,
+        phone,
+        expectedRent,
+        paidAmount,
+        amountDue: expectedRent - paidAmount,
+        txCodes,
+      })
+    } else {
+      paidOverpaid.push({
+        name: tenantName,
+        unit: unitNumber,
+        property: propertyName,
+        phone,
+        expectedRent,
+        paidAmount,
+        txCodes,
+        status: paidAmount > expectedRent ? 'Overpaid' : 'Fully Paid',
+      })
+    }
+  })
+
+  // Identify untraced transactions in current period not bound to an active lease
+  const untracedTransactions: RentReportData['untracedTransactions'] = currentPeriodIncome
+    .filter((t) => !matchedTxIds.has(t.id))
+    .map((t) => ({
+      description: t.description || 'Unidentified Payment Receipt',
+      date: t.transaction_date,
+      amount: Number(t.amount || 0),
+      txCode: t.id ? `TX-${t.id.slice(0, 8).toUpperCase()}` : 'TX-UNKNOWN',
+    }))
+
+  const totalExpectedRent = activeLeases.reduce(
+    (sum: number, l: any) => sum + Number(l.units?.base_rent || 0),
+    0
+  )
+  const totalCollectedRent =
+    paidOverpaid.reduce((sum, p) => sum + p.paidAmount, 0) +
+    partialPayments.reduce((sum, p) => sum + p.paidAmount, 0) +
+    untracedTransactions.reduce((sum, u) => sum + u.amount, 0)
+
+  const collectionRate =
+    totalExpectedRent > 0 ? (totalCollectedRent / totalExpectedRent) * 100 : 0
+
+  const rentReportData: RentReportData = {
+    billingPeriod: currentMonthName,
+    generatedAt: new Date().toLocaleString('en-US', {
+      dateStyle: 'medium',
+      timeStyle: 'short',
+    }),
+    agencyName: agencyData?.name || 'Institutional Real Estate Portfolio',
+    summaryMetrics: {
+      expectedRent: totalExpectedRent,
+      collectedRent: totalCollectedRent,
+      collectionRate,
+      fullyPaidCount: paidOverpaid.length,
+      partialPayCount: partialPayments.length,
+      unpaidCount: unpaidTenants.length,
+      untracedCount: untracedTransactions.length,
+    },
+    unpaidTenants,
+    partialPayments,
+    untracedTransactions,
+    paidOverpaid,
+  }
 
   return (
     <div className="p-4 md:p-8 text-slate-900 w-full max-w-7xl mx-auto space-y-8">
@@ -74,6 +250,10 @@ export default async function FinancialsPage({
           <p className="text-xs md:text-sm text-slate-500 mt-1">
             Portfolio cash flow ledger, verified rent collections, operating expenses, and net profit audit.
           </p>
+        </div>
+
+        <div className="flex items-center gap-2.5">
+          <ExportReportButton reportData={rentReportData} />
         </div>
       </header>
 

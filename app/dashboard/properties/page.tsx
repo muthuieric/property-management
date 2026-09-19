@@ -93,12 +93,14 @@ export default async function PropertiesPage({
               Cancel Edit
             </Link>
           )}
-          <Link
-            href="/dashboard/properties#property-form"
-            className="bg-slate-900 hover:bg-slate-800 hover:shadow-md text-white px-4 py-2.5 rounded-xl cursor-pointer transition-all duration-200 ease-in-out text-xs font-semibold shadow-xs flex items-center gap-1.5"
-          >
-            <span>+ Add Property</span>
-          </Link>
+          {isOwner && (
+            <Link
+              href="/dashboard/properties#property-form"
+              className="bg-slate-900 hover:bg-slate-800 hover:shadow-md text-white px-4 py-2.5 rounded-xl cursor-pointer transition-all duration-200 ease-in-out text-xs font-semibold shadow-xs flex items-center gap-1.5"
+            >
+              <span>+ Add Property</span>
+            </Link>
+          )}
         </div>
       </header>
 
@@ -110,10 +112,10 @@ export default async function PropertiesPage({
       )}
 
       {/* Main Content Layout */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+      <div className={`grid grid-cols-1 ${isOwner || isEditing ? 'lg:grid-cols-3' : 'lg:grid-cols-1'} gap-8`}>
         
-        {/* Left Side: Sleek CSS Grid of Property Bento Cards (2 cols) */}
-        <div className="lg:col-span-2 space-y-6">
+        {/* Left Side: Sleek CSS Grid of Property Bento Cards */}
+        <div className={`${isOwner || isEditing ? 'lg:col-span-2' : 'lg:col-span-1'} space-y-6`}>
           <div className="flex items-center justify-between">
             <h2 className="text-base font-bold text-slate-900">
               Managed Sites ({properties.length})
@@ -125,10 +127,10 @@ export default async function PropertiesPage({
 
           {properties.length === 0 ? (
             <div className="bg-white shadow-sm border border-slate-200 rounded-xl p-12 text-center text-xs text-slate-500">
-              No properties registered in this agency yet. Use the form on the right to add your first property site.
+              No properties registered in this agency yet.
             </div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+            <div className={`grid grid-cols-1 ${isOwner || isEditing ? 'md:grid-cols-2' : 'md:grid-cols-3'} gap-5`}>
               {properties.map((prop) => {
                 const propUnits = units.filter((u) => u.property_id === prop.id)
                 const propTotalUnits = propUnits.length
@@ -235,127 +237,137 @@ export default async function PropertiesPage({
         </div>
 
         {/* Right Side: Add / Edit Property Form */}
-        <div id="property-form">
-          <div className="bg-white shadow-sm border border-slate-200 rounded-xl p-6 sticky top-20">
-            <div className="flex justify-between items-center pb-4 mb-4 border-b border-slate-100">
-              <div>
-                <h2 className="text-base font-bold text-slate-900">
-                  {isEditing ? 'Edit Property Site' : 'Register New Property'}
-                </h2>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  {isEditing ? 'Update site details and coordinator assignment.' : 'Add a property asset to your portfolio.'}
-                </p>
-              </div>
-              {isEditing && (
-                <Link
-                  href="/dashboard/properties"
-                  className="text-xs text-slate-500 hover:text-slate-900 font-medium underline"
-                >
-                  Clear
-                </Link>
-              )}
-            </div>
-
-            <form
-              action={isEditing ? updateProperty : createProperty}
-              className="flex flex-col gap-4"
-            >
-              {isEditing && (
-                <input type="hidden" name="id" value={propertyToEdit?.id} />
-              )}
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1.5" htmlFor="name">
-                  Property Site Name
-                </label>
-                <input
-                  id="name"
-                  name="name"
-                  defaultValue={propertyToEdit?.name || ''}
-                  placeholder="e.g. Sunrise Executive Apartments"
-                  required
-                  className="w-full rounded-lg px-3.5 py-2.5 text-xs bg-slate-50 border border-slate-200 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900 transition"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1.5" htmlFor="location">
-                  Physical Address / Location
-                </label>
-                <input
-                  id="location"
-                  name="location"
-                  defaultValue={propertyToEdit?.location || ''}
-                  placeholder="e.g. Westlands, Nairobi"
-                  required
-                  className="w-full rounded-lg px-3.5 py-2.5 text-xs bg-slate-50 border border-slate-200 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900 transition"
-                />
-              </div>
-
-              {/* Property Manager Dropdown */}
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1.5" htmlFor="manager_id">
-                  Assigned Coordinator (SLA Lead)
-                </label>
-                {isOwner ? (
-                  <>
-                    <select
-                      id="manager_id"
-                      name="manager_id"
-                      defaultValue={propertyToEdit?.manager_id || ''}
-                      className="w-full rounded-lg px-3.5 py-2.5 text-xs bg-slate-50 border border-slate-200 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900 transition"
-                    >
-                      <option value="">-- Unassigned (Select Coordinator) --</option>
-                      {propertyManagers && propertyManagers.length > 0 ? (
-                        propertyManagers.map((manager) => {
-                          const displayName =
-                            `${manager.first_name || ''} ${manager.last_name || ''}`.trim() ||
-                            `Coordinator (${manager.id.slice(0, 6)})`
-                          return (
-                            <option key={manager.id} value={manager.id}>
-                              {displayName}
-                            </option>
-                          )
-                        })
-                      ) : (
-                        <option value="" disabled>
-                          No property managers registered
-                        </option>
-                      )}
-                    </select>
-                    {(!propertyManagers || propertyManagers.length === 0) && (
-                      <p className="text-[11px] text-amber-600 mt-1">
-                        No coordinators available.{' '}
-                        <Link href="/dashboard/team" className="underline font-semibold">
-                          Invite managers under Team
-                        </Link>
-                        .
-                      </p>
-                    )}
-                  </>
-                ) : (
-                  <div className="rounded-lg border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-xs text-slate-700">
-                    <p className="font-semibold">
-                      {propertyToEdit?.manager_id
-                        ? managerMap.get(propertyToEdit.manager_id) || 'Assigned'
-                        : 'Unassigned'}
-                    </p>
-                    <p className="text-[11px] text-slate-400 mt-1">
-                      Only the Agency Owner is authorized to delegate properties.
-                    </p>
-                  </div>
+        {(isOwner || isEditing) && (
+          <div id="property-form">
+            <div className="bg-white shadow-sm border border-slate-200 rounded-xl p-6 sticky top-20">
+              <div className="flex justify-between items-center pb-4 mb-4 border-b border-slate-100">
+                <div>
+                  <h2 className="text-base font-bold text-slate-900">
+                    {isEditing ? 'Edit Property Site' : 'Register New Property'}
+                  </h2>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    {isEditing ? 'Update site details and coordinator assignment.' : 'Add a property asset to your portfolio.'}
+                  </p>
+                </div>
+                {isEditing && (
+                  <Link
+                    href="/dashboard/properties"
+                    className="text-xs text-slate-500 hover:text-slate-900 font-medium underline"
+                  >
+                    Clear
+                  </Link>
                 )}
               </div>
 
-              <button
-                type="submit"
-                className="mt-2 bg-slate-900 hover:bg-slate-800 hover:shadow-md text-white font-semibold text-xs py-3 rounded-lg shadow-xs cursor-pointer transition-all duration-200 ease-in-out"
+              <form
+                action={isEditing ? updateProperty : createProperty}
+                className="flex flex-col gap-4"
               >
-                {isEditing ? 'Update Property Site' : 'Register Property'}
-              </button>
-            </form>
+                {isEditing && (
+                  <input type="hidden" name="id" value={propertyToEdit?.id} />
+                )}
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1.5" htmlFor="name">
+                    Property Name
+                  </label>
+                  <input
+                    id="name"
+                    name="name"
+                    type="text"
+                    required
+                    defaultValue={propertyToEdit?.name || ''}
+                    placeholder="e.g. Westlands Commercial Center"
+                    className="w-full text-xs px-3.5 py-2.5 rounded-lg border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition text-slate-900 placeholder-slate-400"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1.5" htmlFor="location">
+                    Location
+                  </label>
+                  <input
+                    id="location"
+                    name="location"
+                    type="text"
+                    required
+                    defaultValue={propertyToEdit?.location || ''}
+                    placeholder="e.g. Ring Road, Westlands, Nairobi"
+                    className="w-full text-xs px-3.5 py-2.5 rounded-lg border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition text-slate-900 placeholder-slate-400"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1.5" htmlFor="property_type">
+                    Property Asset Class
+                  </label>
+                  <select
+                    id="property_type"
+                    name="property_type"
+                    defaultValue={propertyToEdit?.property_type || 'Residential'}
+                    className="w-full text-xs px-3.5 py-2.5 rounded-lg border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition text-slate-900"
+                  >
+                    <option value="Residential">Residential</option>
+                    <option value="Commercial">Commercial</option>
+                    <option value="Industrial">Industrial</option>
+                    <option value="Mixed Use">Mixed Use</option>
+                  </select>
+                </div>
+
+                {/* Coordinator Assignment Field */}
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1.5" htmlFor="manager_id">
+                    Designated Property Manager
+                  </label>
+                  {isOwner ? (
+                    <>
+                      <select
+                        id="manager_id"
+                        name="manager_id"
+                        defaultValue={propertyToEdit?.manager_id || ''}
+                        className="w-full text-xs px-3.5 py-2.5 rounded-lg border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition text-slate-900"
+                      >
+                        <option value="">-- Unassigned (None) --</option>
+                        {propertyManagers?.map((pm) => (
+                          <option key={pm.id} value={pm.id}>
+                            {pm.first_name} {pm.last_name} ({pm.role})
+                          </option>
+                        ))}
+                      </select>
+                      {(!propertyManagers || propertyManagers.length === 0) && (
+                        <p className="text-[11px] text-slate-400 mt-1.5">
+                          No coordinators available.{' '}
+                          <Link href="/dashboard/team" className="underline font-semibold">
+                            Invite managers under Team
+                          </Link>
+                          .
+                        </p>
+                      )}
+                    </>
+                  ) : (
+                    <div className="rounded-lg border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-xs text-slate-700">
+                      <p className="font-semibold">
+                        {propertyToEdit?.manager_id
+                          ? managerMap.get(propertyToEdit.manager_id) || 'Assigned'
+                          : 'Unassigned'}
+                      </p>
+                      <p className="text-[11px] text-slate-400 mt-1">
+                        Only the Agency Owner is authorized to delegate properties.
+                      </p>
+                    </div>
+                  )}
+                </div>
+
+                <button
+                  type="submit"
+                  className="mt-2 bg-slate-900 hover:bg-slate-800 hover:shadow-md text-white font-semibold text-xs py-3 rounded-lg shadow-xs cursor-pointer transition-all duration-200 ease-in-out"
+                >
+                  {isEditing ? 'Update Property Site' : 'Register Property'}
+                </button>
+              </form>
+            </div>
           </div>
-        </div>
+        )}
 
       </div>
     </div>

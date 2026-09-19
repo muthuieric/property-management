@@ -8,24 +8,45 @@ import { getUserAgencyContext } from '@/utils/supabase/get-context'
 
 export async function postWaterBill(formData: FormData) {
   const supabase = await createClient()
-  const { agencyId } = await getUserAgencyContext()
+  const { agencyId, userId } = await getUserAgencyContext()
 
   const tenant_id = formData.get('tenant_id') as string
   const unit_id = formData.get('unit_id') as string
   const property_id = formData.get('property_id') as string
   const rawAmount = formData.get('amount') as string
   const customDescription = formData.get('description') as string
+  const prevReadingRaw = formData.get('previous_reading') as string
+  const currReadingRaw = formData.get('current_reading') as string
+  const rateRaw = formData.get('rate_per_unit') as string
 
-  const amount = parseFloat(rawAmount)
+  let amount = parseFloat(rawAmount)
+  const prevReading = prevReadingRaw ? parseFloat(prevReadingRaw) : null
+  const currReading = currReadingRaw ? parseFloat(currReadingRaw) : null
+  const rate = rateRaw ? parseFloat(rateRaw) : 150
+
+  let consumption: number | null = null
+  if (prevReading !== null && currReading !== null && !isNaN(prevReading) && !isNaN(currReading)) {
+    consumption = Math.max(0, currReading - prevReading)
+    if (isNaN(amount) || amount <= 0) {
+      amount = consumption * rate
+    }
+  }
+
+  const queryParams = property_id ? `&property_id=${property_id}` : ''
+
   if (!tenant_id || isNaN(amount) || amount <= 0) {
-    redirect('/dashboard/clearance?message=Please enter a valid water bill amount')
+    redirect(`/dashboard/clearance?message=Please enter a valid water bill amount or meter readings${queryParams}`)
   }
 
   const today = new Date().toISOString().split('T')[0]
   const currentMonth = new Date().toLocaleString('en-US', { month: 'long', year: 'numeric' })
-  const description = customDescription?.trim() || `Monthly Water Utility Bill - ${currentMonth}`
+  const description =
+    customDescription?.trim() ||
+    (consumption !== null
+      ? `Monthly Water Bill (${consumption.toFixed(1)} m³ @ KES ${rate}) [Meter: ${prevReading} -> ${currReading}] - ${currentMonth}`
+      : `Monthly Water Utility Bill - ${currentMonth}`)
 
-  const { error } = await supabase
+  const { data: txData, error } = await supabase
     .from('transactions')
     .insert([
       {
@@ -37,12 +58,41 @@ export async function postWaterBill(formData: FormData) {
         amount,
         transaction_date: today,
         description,
-      }
+      },
     ])
+    .select('id')
+    .single()
 
   if (error) {
     console.error('Error posting water bill:', error)
-    redirect('/dashboard/clearance?message=Failed to post water bill')
+    redirect(`/dashboard/clearance?message=Failed to post water bill${queryParams}`)
+  }
+
+  // Record into water_meter_readings if readings were provided
+  if (prevReading !== null && currReading !== null && unit_id) {
+    try {
+      const billingMonthDate = `${today.slice(0, 7)}-01`
+      await supabase.from('water_meter_readings').upsert(
+        [
+          {
+            agency_id: agencyId,
+            property_id: property_id || null,
+            unit_id,
+            tenant_id: tenant_id || null,
+            billing_month: billingMonthDate,
+            previous_reading: prevReading,
+            current_reading: currReading,
+            rate_per_unit: rate,
+            total_amount: amount,
+            recorded_by: userId,
+            billed_transaction_id: txData?.id || null,
+          },
+        ],
+        { onConflict: 'unit_id,billing_month' }
+      )
+    } catch (meterErr) {
+      console.warn('water_meter_readings table not available or insert error:', meterErr)
+    }
   }
 
   revalidatePath('/dashboard/clearance')
@@ -50,7 +100,7 @@ export async function postWaterBill(formData: FormData) {
   revalidatePath('/dashboard/financials')
   revalidatePath('/portal')
   revalidatePath('/portal/clearance')
-  redirect('/dashboard/clearance?message=Water bill posted successfully')
+  redirect(`/dashboard/clearance?message=Water bill of KES ${amount.toLocaleString()} posted successfully${queryParams}`)
 }
 
 export async function initiateMoveOut(formData: FormData) {
