@@ -10,6 +10,7 @@
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+  --font-serif: "Playfair Display", Didot, "Bodoni MT", "Cinzel", "Cormorant Garamond", Georgia, serif;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -41,5 +42,33 @@ button:disabled,
 input[type="button"]:disabled,
 input[type="submit"]:disabled {
   cursor: not-allowed;
+}
+
+@keyframes pulseSlow {
+  0%, 100% {
+    opacity: 0.25;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.55;
+    transform: scale(1.06);
+  }
+}
+
+@keyframes floatSlow {
+  0%, 100% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-8px);
+  }
+}
+
+.animate-pulse-slow {
+  animation: pulseSlow 8s ease-in-out infinite;
+}
+
+.animate-float-slow {
+  animation: floatSlow 6s ease-in-out infinite;
 }
 

@@ -2,6 +2,7 @@
 import { createClient } from '@/utils/supabase/server'
 import { getUserAgencyContext } from '@/utils/supabase/get-context'
 import { createProperty, updateProperty } from './actions'
+import PropertyForm from './components/PropertyForm'
 import Link from 'next/link'
 
 export default async function PropertiesPage({
@@ -169,7 +170,21 @@ export default async function PropertiesPage({
                           <p className="text-slate-500 text-xs mt-0.5 truncate">
                             {prop.location}
                           </p>
+                          <div className="flex flex-wrap items-center gap-1.5 mt-2">
+                            <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-slate-100 text-slate-700">
+                              {prop.property_type || 'Apartment'}
+                            </span>
+                            <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-blue-50 text-blue-700 border border-blue-200/50">
+                              For {prop.purpose || 'Rent'}
+                            </span>
+                            {prop.floors && (
+                              <span className="text-[10px] font-medium px-2 py-0.5 rounded-md bg-slate-50 text-slate-600 border border-slate-200">
+                                {prop.floors} {prop.floors === 1 ? 'Floor' : 'Floors'}
+                              </span>
+                            )}
+                          </div>
                         </div>
+
 
                         {/* Coordinator pill */}
                         {managerName ? (
@@ -210,6 +225,16 @@ export default async function PropertiesPage({
                             KES {totalRentRoll.toLocaleString()}
                           </span>
                         </div>
+
+                        {/* Agency Commission (Management Fee) */}
+                        {isOwner && Number(prop.management_fee_percentage || 0) > 0 && (
+                          <div className="mt-1.5 flex items-center justify-between text-xs">
+                            <span className="text-slate-400">Management Fee ({prop.management_fee_percentage}%):</span>
+                            <span className="font-semibold text-emerald-700 tabular-nums">
+                              KES {Math.round(totalRentRoll * (Number(prop.management_fee_percentage) / 100)).toLocaleString()}
+                            </span>
+                          </div>
+                        )}
                       </div>
                     </div>
 
@@ -238,135 +263,13 @@ export default async function PropertiesPage({
 
         {/* Right Side: Add / Edit Property Form */}
         {(isOwner || isEditing) && (
-          <div id="property-form">
-            <div className="bg-white shadow-sm border border-slate-200 rounded-xl p-6 sticky top-20">
-              <div className="flex justify-between items-center pb-4 mb-4 border-b border-slate-100">
-                <div>
-                  <h2 className="text-base font-bold text-slate-900">
-                    {isEditing ? 'Edit Property Site' : 'Register New Property'}
-                  </h2>
-                  <p className="text-xs text-slate-500 mt-0.5">
-                    {isEditing ? 'Update site details and coordinator assignment.' : 'Add a property asset to your portfolio.'}
-                  </p>
-                </div>
-                {isEditing && (
-                  <Link
-                    href="/dashboard/properties"
-                    className="text-xs text-slate-500 hover:text-slate-900 font-medium underline"
-                  >
-                    Clear
-                  </Link>
-                )}
-              </div>
-
-              <form
-                action={isEditing ? updateProperty : createProperty}
-                className="flex flex-col gap-4"
-              >
-                {isEditing && (
-                  <input type="hidden" name="id" value={propertyToEdit?.id} />
-                )}
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1.5" htmlFor="name">
-                    Property Name
-                  </label>
-                  <input
-                    id="name"
-                    name="name"
-                    type="text"
-                    required
-                    defaultValue={propertyToEdit?.name || ''}
-                    placeholder="e.g. Westlands Commercial Center"
-                    className="w-full text-xs px-3.5 py-2.5 rounded-lg border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition text-slate-900 placeholder-slate-400"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1.5" htmlFor="location">
-                    Location
-                  </label>
-                  <input
-                    id="location"
-                    name="location"
-                    type="text"
-                    required
-                    defaultValue={propertyToEdit?.location || ''}
-                    placeholder="e.g. Ring Road, Westlands, Nairobi"
-                    className="w-full text-xs px-3.5 py-2.5 rounded-lg border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition text-slate-900 placeholder-slate-400"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1.5" htmlFor="property_type">
-                    Property Asset Class
-                  </label>
-                  <select
-                    id="property_type"
-                    name="property_type"
-                    defaultValue={propertyToEdit?.property_type || 'Residential'}
-                    className="w-full text-xs px-3.5 py-2.5 rounded-lg border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition text-slate-900"
-                  >
-                    <option value="Residential">Residential</option>
-                    <option value="Commercial">Commercial</option>
-                    <option value="Industrial">Industrial</option>
-                    <option value="Mixed Use">Mixed Use</option>
-                  </select>
-                </div>
-
-                {/* Coordinator Assignment Field */}
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1.5" htmlFor="manager_id">
-                    Designated Property Manager
-                  </label>
-                  {isOwner ? (
-                    <>
-                      <select
-                        id="manager_id"
-                        name="manager_id"
-                        defaultValue={propertyToEdit?.manager_id || ''}
-                        className="w-full text-xs px-3.5 py-2.5 rounded-lg border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition text-slate-900"
-                      >
-                        <option value="">-- Unassigned (None) --</option>
-                        {propertyManagers?.map((pm) => (
-                          <option key={pm.id} value={pm.id}>
-                            {pm.first_name} {pm.last_name} ({pm.role})
-                          </option>
-                        ))}
-                      </select>
-                      {(!propertyManagers || propertyManagers.length === 0) && (
-                        <p className="text-[11px] text-slate-400 mt-1.5">
-                          No coordinators available.{' '}
-                          <Link href="/dashboard/team" className="underline font-semibold">
-                            Invite managers under Team
-                          </Link>
-                          .
-                        </p>
-                      )}
-                    </>
-                  ) : (
-                    <div className="rounded-lg border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-xs text-slate-700">
-                      <p className="font-semibold">
-                        {propertyToEdit?.manager_id
-                          ? managerMap.get(propertyToEdit.manager_id) || 'Assigned'
-                          : 'Unassigned'}
-                      </p>
-                      <p className="text-[11px] text-slate-400 mt-1">
-                        Only the Agency Owner is authorized to delegate properties.
-                      </p>
-                    </div>
-                  )}
-                </div>
-
-                <button
-                  type="submit"
-                  className="mt-2 bg-slate-900 hover:bg-slate-800 hover:shadow-md text-white font-semibold text-xs py-3 rounded-lg shadow-xs cursor-pointer transition-all duration-200 ease-in-out"
-                >
-                  {isEditing ? 'Update Property Site' : 'Register Property'}
-                </button>
-              </form>
-            </div>
-          </div>
+          <PropertyForm
+            isOwner={isOwner}
+            isEditing={isEditing}
+            propertyToEdit={propertyToEdit}
+            propertyManagers={propertyManagers || []}
+            managerMap={managerMap}
+          />
         )}
 
       </div>

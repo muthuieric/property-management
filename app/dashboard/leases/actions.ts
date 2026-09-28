@@ -55,6 +55,7 @@ export async function createLease(formData: FormData): Promise<CreateLeaseResult
       start_date,
       deposit_amount: isNaN(deposit_amount) ? 0 : deposit_amount,
       is_active: true,
+      lease_status: 'pending_signature',
       agency_id: agencyId,
     }
 
@@ -75,8 +76,20 @@ export async function createLease(formData: FormData): Promise<CreateLeaseResult
     if (leaseError) {
       console.error('Error creating lease record:', leaseError)
 
+      // Fallback: If lease_status column not yet migrated, remove and retry
+      if (leaseError.message?.includes('lease_status')) {
+        delete leaseData.lease_status
+        const retryResult = await supabase
+          .from('leases')
+          .insert([leaseData])
+          .select('id')
+          .single()
+        newLease = retryResult.data
+        leaseError = retryResult.error
+      }
+
       // Fallback: If deposit_months column not yet migrated, remove and retry
-      if (leaseError.message?.includes('deposit_months')) {
+      if (leaseError && leaseError.message?.includes('deposit_months')) {
         delete leaseData.deposit_months
         const retryResult = await supabase
           .from('leases')

@@ -3,6 +3,7 @@ import { createClient } from '@/utils/supabase/server'
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import PropertyUnitsTable from './components/PropertyUnitsTable'
+import UnitWizardTrigger from './components/UnitWizardTrigger'
 
 export default async function PropertyPage({ 
   params 
@@ -132,13 +133,17 @@ export default async function PropertyPage({
           </div>
         </div>
 
-        <div className="flex items-center gap-2.5">
+        <div className="flex flex-wrap items-center gap-2.5">
           <Link
             href={`/dashboard/properties?edit=${propertyId}`}
             className="bg-white border border-slate-200 text-slate-700 px-4 py-2.5 rounded-xl hover:bg-slate-50 cursor-pointer transition-all duration-200 ease-in-out text-xs font-semibold shadow-xs"
           >
             Edit Property
           </Link>
+          <UnitWizardTrigger
+            propertyId={propertyId}
+            propertyName={property.name}
+          />
           <Link
             href={`/dashboard/property/${propertyId}/add-unit`}
             className="bg-slate-900 hover:bg-slate-800 hover:shadow-md text-white px-4 py-2.5 rounded-xl cursor-pointer transition-all duration-200 ease-in-out text-xs font-semibold shadow-xs flex items-center gap-1.5"

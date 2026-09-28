@@ -2,7 +2,7 @@
 import { createClient } from '@/utils/supabase/server'
 import { getUserAgencyContext } from '@/utils/supabase/get-context'
 import Link from 'next/link'
-import { resolveTicket, updateTicketDetails } from './actions'
+import { resolveTicket, updateTicketDetails, approveQuote } from './actions'
 import MaintenanceActionTriggers from './components/MaintenanceActionTriggers'
 import AddContractorButton from './components/AddContractorButton'
 
@@ -23,6 +23,15 @@ function calculateDuration(startStr: string, endStr?: string | null) {
 export default async function MaintenancePage() {
   const supabase = await createClient()
   const { userId, agencyId, role } = await getUserAgencyContext()
+
+  // Fetch agency maintenance expense auto-approval threshold
+  const { data: agencyRecord } = await supabase
+    .from('agencies')
+    .select('maintenance_auto_approve_limit')
+    .eq('id', agencyId)
+    .maybeSingle()
+
+  const autoApproveLimit = Number(agencyRecord?.maintenance_auto_approve_limit ?? 5000.0)
 
   // 1. Fetch coordinator's assigned properties (or all properties for agency owner)
   let propertiesQuery = supabase
@@ -63,7 +72,107 @@ export default async function MaintenancePage() {
       // Coordinators with 0 assigned properties have no active tickets in their scope
       ticketList = []
     } else {
-      const { data: tickets, error: ticketsError } = await supabase
+      let { data: tickets, error: ticketsError } = await supabase
+        .from('maintenance_tickets')
+        .select(`
+          id,
+          issue_description,
+          status,
+          created_at,
+          resolved_at,
+          cost,
+          quote_amount,
+          quote_status,
+          image_url,
+          assigned_to,
+          unit_id,
+          units!inner (
+            id,
+            unit_number,
+            property_id,
+            properties!inner ( id, name )
+          ),
+          tenants:tenants!maintenance_tickets_tenant_id_fkey ( first_name, last_name, phone_number ),
+          contractors ( id, name, specialty, phone_number )
+        `)
+        .eq('agency_id', agencyId)
+        .in('units.property_id', propertyIds)
+        .order('created_at', { ascending: false })
+
+      // Fallback if quote_amount / quote_status columns not yet migrated
+      if (
+        ticketsError &&
+        (ticketsError.message?.includes('quote_amount') ||
+          ticketsError.message?.includes('quote_status'))
+      ) {
+        const fallback = await supabase
+          .from('maintenance_tickets')
+          .select(`
+            id,
+            issue_description,
+            status,
+            created_at,
+            resolved_at,
+            cost,
+            image_url,
+            assigned_to,
+            unit_id,
+            units!inner (
+              id,
+              unit_number,
+              property_id,
+              properties!inner ( id, name )
+            ),
+            tenants:tenants!maintenance_tickets_tenant_id_fkey ( first_name, last_name, phone_number ),
+            contractors ( id, name, specialty, phone_number )
+          `)
+          .eq('agency_id', agencyId)
+          .in('units.property_id', propertyIds)
+          .order('created_at', { ascending: false })
+        tickets = (fallback.data as any) || []
+        ticketsError = fallback.error
+      }
+
+      if (ticketsError) {
+        console.error('Error fetching maintenance tickets:', ticketsError)
+      }
+      ticketList = tickets || []
+    }
+  } else {
+    // Agency Owner: sees all tickets across the entire agency
+    let { data: tickets, error: ticketsError } = await supabase
+      .from('maintenance_tickets')
+      .select(`
+        id,
+        issue_description,
+        status,
+        created_at,
+        resolved_at,
+        cost,
+        quote_amount,
+        quote_status,
+        image_url,
+        assigned_to,
+        unit_id,
+        units!inner (
+          id,
+          unit_number,
+          property_id,
+          properties!inner ( id, name )
+        ),
+        tenants:tenants!maintenance_tickets_tenant_id_fkey ( first_name, last_name, phone_number ),
+        contractors ( id, name, specialty, phone_number )
+      `)
+      .eq('agency_id', agencyId)
+      .order('created_at', { ascending: false })
+
+    // Fallback if quote_amount / quote_status columns not yet migrated
+    if (
+      ticketsError &&
+      (ticketsError.message?.includes('quote_amount') ||
+        ticketsError.message?.includes('quote_status'))
+    ) {
+      const fallback = await supabase
         .from('maintenance_tickets')
         .select(`
           id,
@@ -85,39 +194,10 @@ export default async function MaintenancePage() {
           contractors ( id, name, specialty, phone_number )
         `)
         .eq('agency_id', agencyId)
-        .in('units.property_id', propertyIds)
         .order('created_at', { ascending: false })
-
-      if (ticketsError) {
-        console.error('Error fetching maintenance tickets:', ticketsError)
-      }
-      ticketList = tickets || []
+      tickets = (fallback.data as any) || []
+      ticketsError = fallback.error
     }
-  } else {
-    // Agency Owner: sees all tickets across the entire agency
-    const { data: tickets, error: ticketsError } = await supabase
-      .from('maintenance_tickets')
-      .select(`
-        id,
-        issue_description,
-        status,
-        created_at,
-        resolved_at,
-        cost,
-        image_url,
-        assigned_to,
-        unit_id,
-        units!inner (
-          id,
-          unit_number,
-          property_id,
-          properties!inner ( id, name )
-        ),
-        tenants:tenants!maintenance_tickets_tenant_id_fkey ( first_name, last_name, phone_number ),
-        contractors ( id, name, specialty, phone_number )
-      `)
-      .eq('agency_id', agencyId)
-      .order('created_at', { ascending: false })
 
     if (ticketsError) {
       console.error('Error fetching maintenance tickets:', ticketsError)
@@ -283,6 +363,11 @@ export default async function MaintenancePage() {
               const isInProgress = ticket.status === 'In Progress'
               const isPending = !isResolved && !isInProgress
 
+              const quoteAmount = Number(ticket.quote_amount ?? ticket.cost ?? 0)
+              const isQuoteOverLimit = quoteAmount > autoApproveLimit
+              const isQuoteApproved = ticket.quote_status === 'approved'
+              const isCoordinator = role === 'property_manager'
+
               const ageHours = (now - new Date(ticket.created_at).getTime()) / (1000 * 60 * 60)
               const isSlaBreached = !isResolved && ageHours >= 48
               const duration = calculateDuration(ticket.created_at, ticket.resolved_at)
@@ -315,6 +400,25 @@ export default async function MaintenancePage() {
                     </div>
 
                     <div className="flex flex-wrap items-center gap-2 shrink-0 self-start">
+                      {/* Quote Approval Badges */}
+                      {isQuoteApproved && (
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-800 border border-emerald-300">
+                          <svg className="w-3.5 h-3.5 text-emerald-600" fill="currentColor" viewBox="0 0 20 20">
+                            <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                          </svg>
+                          <span>Quote Approved</span>
+                        </span>
+                      )}
+
+                      {!isQuoteApproved && isQuoteOverLimit && (
+                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-50 text-amber-800 border border-amber-300">
+                          <svg className="w-3.5 h-3.5 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                          </svg>
+                          <span>Admin Approval Required</span>
+                        </span>
+                      )}
+
                       {/* Status Badges with color psychology */}
                       {isPending && (
                         <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-50 text-amber-800 border border-amber-200">
@@ -343,6 +447,66 @@ export default async function MaintenancePage() {
                       )}
                     </div>
                   </div>
+
+                  {/* EXPENSE LIMIT WARNING / LOCK BANNER FOR COORDINATORS */}
+                  {!isQuoteApproved && isQuoteOverLimit && isCoordinator && (
+                    <div className="my-3 p-3.5 bg-amber-50/90 border border-amber-300 rounded-xl flex items-start gap-3 text-xs text-amber-950 shadow-xs">
+                      <div className="w-8 h-8 rounded-lg bg-amber-100 border border-amber-200 flex items-center justify-center text-amber-800 shrink-0 mt-0.5">
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                        </svg>
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-bold text-amber-950">
+                            Expense Limit Exceeded
+                          </span>
+                          <span className="text-[10px] font-mono bg-amber-200/80 text-amber-900 px-2 py-0.5 rounded font-semibold border border-amber-300">
+                            Auto-Approve Threshold: KES {autoApproveLimit.toLocaleString()}
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-amber-800 mt-1 leading-relaxed">
+                          Repair quote of <strong>KES {quoteAmount.toLocaleString()}</strong> exceeds your coordinator spending limit. Agency Owner sign-off is required before work can be authorized.
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* HIGH-VALUE WORK ORDER APPROVAL BANNER FOR AGENCY OWNERS */}
+                  {!isQuoteApproved && isQuoteOverLimit && !isCoordinator && (
+                    <div className="my-3 p-3.5 bg-emerald-50/80 border border-emerald-200 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs shadow-xs">
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-lg bg-emerald-100 text-emerald-800 flex items-center justify-center shrink-0">
+                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                          </svg>
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="font-bold text-emerald-950">High-Value Work Order (KES {quoteAmount.toLocaleString()})</span>
+                            <span className="text-[10px] font-semibold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded">Owner Sign-Off Required</span>
+                          </div>
+                          <p className="text-[11px] text-emerald-800 mt-0.5">
+                            Exceeds standard coordinator limit of KES {autoApproveLimit.toLocaleString()}. Review contractor details and authorize spending.
+                          </p>
+                        </div>
+                      </div>
+
+                      <form action={approveQuote} className="shrink-0 self-end sm:self-center">
+                        <input type="hidden" name="ticket_id" value={ticket.id} />
+                        <input type="hidden" name="quote_amount" value={quoteAmount} />
+                        <button
+                          type="submit"
+                          className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs transition-all shadow-xs cursor-pointer flex items-center gap-1.5"
+                        >
+                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                          </svg>
+                          <span>Approve Quote</span>
+                        </button>
+                      </form>
+                    </div>
+                  )}
 
                   {/* Photo Evidence (if uploaded) */}
                   {ticket.image_url && (
@@ -414,6 +578,7 @@ export default async function MaintenancePage() {
                       className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs"
                     >
                       <input type="hidden" name="ticket_id" value={ticket.id} />
+                      <input type="hidden" name="quote_amount" value={quoteAmount} />
 
                       <div className="flex flex-wrap items-center gap-3 flex-1">
                         {/* Status Selector */}
@@ -467,13 +632,42 @@ export default async function MaintenancePage() {
                         </div>
                       </div>
 
-                      {/* Save Changes CTA Button */}
-                      <button
-                        type="submit"
-                        className="bg-slate-900 hover:bg-slate-800 text-white font-semibold px-4 py-2 rounded-lg cursor-pointer transition-all duration-200 ease-in-out self-end sm:self-center shadow-xs"
-                      >
-                        Update Ticket
-                      </button>
+                      {/* Action CTA Buttons */}
+                      <div className="flex items-center gap-2 self-end sm:self-center">
+                        <button
+                          type="submit"
+                          className="bg-slate-900 hover:bg-slate-800 text-white font-semibold px-4 py-2 rounded-lg cursor-pointer transition-all duration-200 ease-in-out shadow-xs"
+                        >
+                          Update Ticket
+                        </button>
+
+                        {quoteAmount > 0 && !isQuoteApproved && (
+                          isCoordinator && isQuoteOverLimit ? (
+                            <button
+                              type="button"
+                              disabled
+                              title={`Quote of KES ${quoteAmount.toLocaleString()} exceeds your auto-approval threshold of KES ${autoApproveLimit.toLocaleString()}. Admin sign-off required.`}
+                              className="bg-slate-100 border border-slate-200 text-slate-400 font-semibold px-3 py-2 rounded-lg text-xs flex items-center gap-1.5 cursor-not-allowed"
+                            >
+                              <svg className="w-3.5 h-3.5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                              </svg>
+                              <span>Locked: Owner Sign-Off Required</span>
+                            </button>
+                          ) : (
+                            <button
+                              type="submit"
+                              formAction={approveQuote}
+                              className="bg-emerald-600 hover:bg-emerald-500 text-white font-semibold px-3.5 py-2 rounded-lg cursor-pointer transition-all text-xs flex items-center gap-1.5 shadow-xs"
+                            >
+                              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                              </svg>
+                              <span>Approve Quote</span>
+                            </button>
+                          )
+                        )}
+                      </div>
                     </form>
                   </div>
                 </div>

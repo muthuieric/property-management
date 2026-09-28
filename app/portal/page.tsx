@@ -25,6 +25,8 @@ export default async function TenantDashboardPage() {
   let currentBalance = 0
   let pendingCharges: any[] = []
 
+  let pendingSignatureLease: any = null
+
   if (tenant) {
     const { data: leases } = await supabase
       .from('leases')
@@ -34,6 +36,8 @@ export default async function TenantDashboardPage() {
         end_date,
         deposit_amount,
         is_active,
+        lease_status,
+        signature_hash,
         units (
           id,
           unit_number,
@@ -50,6 +54,13 @@ export default async function TenantDashboardPage() {
 
     if (leases && leases.length > 0) {
       activeLease = leases[0]
+      pendingSignatureLease = leases.find(
+        (l) => l.lease_status === 'pending_signature' && !l.signature_hash
+      )
+      const activeLeases = leases.filter(
+        (l) => l.is_active || l.lease_status === 'active'
+      )
+      activeLease = activeLeases.length > 0 ? activeLeases[0] : leases[0]
     }
 
     // 4. Fetch tenant financial transactions (rent, bills, utilities)
@@ -57,6 +68,7 @@ export default async function TenantDashboardPage() {
       .from('transactions')
       .select(`
         id,
+        receipt_id,
         transaction_type,
         amount,
         transaction_date,
@@ -129,6 +141,34 @@ export default async function TenantDashboardPage() {
           </Link>
         </div>
       </header>
+
+      {/* PENDING LEASE SIGNATURE ALERT BANNER */}
+      {pendingSignatureLease && (
+        <div className="p-4 bg-amber-50 border border-amber-300 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-xs">
+          <div className="flex items-start sm:items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-amber-500 text-white flex items-center justify-center shrink-0 shadow-xs">
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+              </svg>
+            </div>
+            <div>
+              <p className="text-xs font-bold text-amber-950">
+                Action Required: Sign Your Tenancy Agreement
+              </p>
+              <p className="text-xs text-amber-800">
+                Your lease agreement for Unit #{pendingSignatureLease.units?.unit_number || 'N/A'} ({pendingSignatureLease.units?.properties?.name || 'Property'}) is awaiting your digital signature.
+              </p>
+            </div>
+          </div>
+          <Link
+            href="/portal/lease"
+            className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-semibold shrink-0 transition-all inline-flex items-center gap-1.5 shadow-xs cursor-pointer"
+          >
+            <span>Review &amp; Sign</span>
+            <span>&rarr;</span>
+          </Link>
+        </div>
+      )}
 
       {!activeLease ? (
         <div className="bg-white border border-slate-200 rounded-2xl p-10 shadow-sm text-center max-w-xl mx-auto my-12">
@@ -358,6 +398,7 @@ export default async function TenantDashboardPage() {
                         <th className="py-2.5 px-3">Description</th>
                         <th className="py-2.5 px-3">Type</th>
                         <th className="py-2.5 px-3 text-right">Amount (KES)</th>
+                        <th className="py-2.5 px-3 text-center">Receipt</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
@@ -387,6 +428,21 @@ export default async function TenantDashboardPage() {
                                 {isCredit ? '+ ' : '- '}
                                 KES {Number(tx.amount).toLocaleString('en-US', { minimumFractionDigits: 2 })}
                               </span>
+                            </td>
+                            <td className="py-3 px-3 text-center whitespace-nowrap">
+                              {isCredit ? (
+                                <Link
+                                  href={`/portal/receipts/${tx.receipt_id || tx.id}`}
+                                  className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700 hover:text-emerald-900 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 px-2 py-0.5 rounded-lg transition-colors cursor-pointer"
+                                >
+                                  <svg className="w-3 h-3 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                  </svg>
+                                  <span>Receipt</span>
+                                </Link>
+                              ) : (
+                                <span className="text-slate-300">&mdash;</span>
+                              )}
                             </td>
                           </tr>
                         )
