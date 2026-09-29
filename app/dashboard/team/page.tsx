@@ -6,6 +6,27 @@ import Link from 'next/link'
 import { inviteManager, assignPropertiesFormAction, toggleUserStatusFormAction } from './actions'
 import PortfolioAssignmentDrawer, { PropertyItem } from './PortfolioAssignmentDrawer'
 
+interface UnitRecord {
+  id: string
+  property_id: string
+  is_occupied: boolean
+}
+
+interface MaintenanceTicketRecord {
+  id: string
+  unit_id: string
+  status: string
+}
+
+interface AssignmentLogRecord {
+  id: string
+  property_id: string
+  changed_by: string
+  old_manager_id: string | null
+  new_manager_id: string | null
+  created_at: string
+}
+
 export default async function TeamPage({
   searchParams,
 }: {
@@ -50,15 +71,14 @@ export default async function TeamPage({
   const ownerList = owners || []
   const propertyIds = agencyProperties.map((p) => p.id)
 
-  // 3. Fetch units and maintenance tickets to calculate property metrics for the confirmation warning
   // 3. Fetch units and maintenance tickets to calculate property metrics
-  let units: any[] = []
+  let units: UnitRecord[] = []
   if (propertyIds.length > 0) {
     const { data: allUnits } = await supabase
       .from('units')
       .select('id, property_id, is_occupied')
       .in('property_id', propertyIds)
-    units = allUnits || []
+    units = (allUnits as UnitRecord[]) || []
   }
 
   const { data: openTicketsData } = await supabase
@@ -67,9 +87,8 @@ export default async function TeamPage({
     .eq('agency_id', agencyId)
     .neq('status', 'Resolved')
 
-  const openTickets = openTicketsData || []
+  const openTickets: MaintenanceTicketRecord[] = (openTicketsData as MaintenanceTicketRecord[]) || []
 
-  // Precompute metrics per property for the assignment drawer & confirmation warning
   // Precompute metrics per property for the assignment drawer
   const propertyItems: PropertyItem[] = agencyProperties.map((p) => {
     const propUnits = units.filter((u) => u.property_id === p.id)
@@ -106,7 +125,7 @@ export default async function TeamPage({
   agencyProperties.forEach((p) => propertyNameMap.set(p.id, p.name))
 
   // 4. Fetch recent assignment logs for the Audit Trail
-  let assignmentLogs: any[] = []
+  let assignmentLogs: AssignmentLogRecord[] = []
   try {
     const { data: logs } = await supabase
       .from('assignment_logs')
@@ -114,7 +133,7 @@ export default async function TeamPage({
       .eq('agency_id', agencyId)
       .order('created_at', { ascending: false })
       .limit(10)
-    assignmentLogs = logs || []
+    assignmentLogs = (logs as AssignmentLogRecord[]) || []
   } catch (err) {
     console.warn('Could not query assignment_logs (table may not exist yet):', err)
   }
@@ -122,26 +141,18 @@ export default async function TeamPage({
   const isSuccess = message && message.toLowerCase().includes('success')
 
   return (
-    <div className="p-4 md:p-8 text-slate-900 w-full max-w-7xl mx-auto">
     <div className="p-4 md:p-8 text-slate-900 w-full max-w-7xl mx-auto space-y-8">
       {/* Header */}
-      <header className="mb-8 pb-4 border-b flex flex-col md:flex-row md:items-center md:justify-between gap-4">
       <header className="flex flex-col md:flex-row md:items-end justify-between pb-6 border-b border-slate-200 gap-4">
         <div>
-          <div className="flex items-center gap-2 mb-1">
-            <span className="text-xs font-semibold uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-purple-100 text-purple-800">
           <div className="flex items-center gap-2 mb-2">
             <span className="text-[11px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-slate-900 text-white shadow-xs">
               Agency Owner Access Only
             </span>
-            <span className="text-xs text-gray-500 font-mono">
-              {agencyProperties.length} Portfolio Sites
             <span className="text-xs text-slate-500 font-medium">
               {agencyProperties.length} Portfolio Sites &bull; {managerList.length} Active Coordinators
             </span>
           </div>
-          <h1 className="text-3xl font-bold tracking-tight">Team Management & Portfolio Delegation</h1>
-          <p className="text-sm text-gray-500 mt-1">
           <h1 className="text-2xl md:text-3xl font-bold tracking-tight text-slate-900 font-sans">
             Team Management & Portfolio Delegation
           </h1>
@@ -150,11 +161,9 @@ export default async function TeamPage({
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
         <div className="flex items-center gap-2.5">
           <Link
             href="/dashboard"
-            className="border border-gray-300 bg-white text-gray-700 px-4 py-2 rounded-xl hover:bg-gray-50 transition font-medium text-xs shadow-sm"
             className="border border-slate-200 bg-white text-slate-700 px-4 py-2.5 rounded-xl hover:bg-slate-50 cursor-pointer transition-all duration-200 ease-in-out font-semibold text-xs shadow-xs"
           >
             &larr; Executive Overview
@@ -165,62 +174,43 @@ export default async function TeamPage({
       {/* Message Feedback Banner */}
       {message && (
         <div
-          className={`mb-6 p-4 rounded-xl text-sm border flex items-center justify-between ${
           className={`p-4 rounded-xl text-xs border flex items-center justify-between transition-all duration-200 ${
             isSuccess
               ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
               : 'bg-amber-50 text-amber-900 border-amber-200'
           }`}
         >
-          <span>{message}</span>
           <span className="font-medium">{message}</span>
         </div>
       )}
 
       {/* Main Grid: Team Management & Operations */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 items-start">
-        
-        {/* Left 2 Columns: Manager Roster & Portfolio Assignment UI */}
-        <div className="lg:col-span-2 space-y-6">
-          <div className="bg-white rounded-2xl shadow-sm border overflow-hidden">
-            <div className="p-5 border-b bg-gray-50 flex items-center justify-between">
         {/* Left 2 Columns: Coordinators Roster & Audit Trail */}
         <div className="lg:col-span-2 space-y-8">
-          
           {/* Section: Property Coordinators Bento Roster */}
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <div>
-                <h2 className="text-lg font-bold text-slate-900">Property Coordinators Roster</h2>
-                <p className="text-xs text-gray-500">
-                  Select and delegate specific properties to each coordinator with batch controls.
                 <h2 className="text-base font-bold text-slate-900">Property Coordinators Roster</h2>
                 <p className="text-xs text-slate-500 mt-0.5">
                   Portfolio delegation cards with active site counts, managed units, and work order volume.
                 </p>
               </div>
-              <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-blue-100 text-blue-800">
               <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-slate-100 text-slate-800 tabular-nums">
                 {managerList.length} {managerList.length === 1 ? 'Coordinator' : 'Coordinators'}
               </span>
             </div>
 
             {managerList.length === 0 ? (
-              <div className="p-8 text-center text-xs text-gray-500">
-                <svg className="w-10 h-10 text-gray-300 mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
               <div className="bg-white shadow-sm border border-slate-200 rounded-xl p-12 text-center text-slate-500">
                 <svg className="w-10 h-10 text-slate-300 mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
                 </svg>
-                <p className="font-semibold text-slate-700">No Property Managers Invited Yet</p>
-                <p className="text-gray-400 mt-1">Use the invitation form to onboard your first coordinator.</p>
                 <p className="font-semibold text-slate-700 text-sm">No Property Coordinators Registered</p>
                 <p className="text-xs text-slate-400 mt-1">Use the invitation form to onboard your first site manager.</p>
               </div>
             ) : (
-              <div className="divide-y divide-gray-100">
-              /* Bento Grid of Coordinators */
               <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                 {managerList.map((manager) => {
                   const managerName = `${manager.first_name || ''} ${manager.last_name || ''}`.trim() || 'Property Manager'
@@ -238,24 +228,10 @@ export default async function TeamPage({
                   return (
                     <div
                       key={manager.id}
-                      className={`p-6 hover:bg-slate-50/50 transition ${
-                        !isActive ? 'opacity-50' : ''
                       className={`bg-white rounded-xl shadow-sm border border-slate-200 p-5 flex flex-col justify-between transition-all duration-200 ${
                         !isActive ? 'opacity-50 grayscale' : 'hover:border-slate-300'
                       }`}
                     >
-                      <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4 mb-3">
-                        <div className="flex items-start gap-3">
-                          {/* Avatar with grayscale when suspended */}
-                          <div
-                            className={`w-10 h-10 rounded-full flex items-center justify-center font-bold text-sm shrink-0 ${
-                              isActive
-                                ? 'bg-blue-100 text-blue-800'
-                                : 'bg-gray-200 text-gray-600 grayscale'
-                            }`}
-                          >
-                            {manager.first_name?.[0] || 'C'}
-                            {manager.last_name?.[0] || ''}
                       <div>
                         {/* Top: Coordinator Header */}
                         <div className="flex items-start justify-between gap-3 mb-4">
@@ -295,21 +271,6 @@ export default async function TeamPage({
                         {/* Middle: Micro Bento Metrics */}
                         <div className="grid grid-cols-3 gap-2 py-3 px-3.5 bg-slate-50 rounded-xl border border-slate-100 mb-4 text-center">
                           <div>
-                            <div className="flex items-center gap-2">
-                              <h3 className="font-bold text-base text-slate-900">{managerName}</h3>
-                              {isActive ? (
-                                <span className="text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200">
-                                  Property Coordinator
-                                </span>
-                              ) : (
-                                <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-rose-100 text-rose-800 border border-rose-300 uppercase tracking-wider">
-                                  Suspended
-                                </span>
-                              )}
-                            </div>
-                            <p className="text-xs text-gray-500 mt-0.5">
-                              Joined {new Date(manager.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
-                            </p>
                             <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Sites</span>
                             <span className="text-base font-bold text-slate-900 tabular-nums">
                               {assignedProps.length}
@@ -333,31 +294,12 @@ export default async function TeamPage({
                           </div>
                         </div>
 
-                        {/* Status Toggle & Assignment Badge */}
-                        <div className="flex items-center gap-2.5 self-start">
-                          <span className="text-xs font-semibold px-2.5 py-1 rounded-lg bg-slate-100 text-slate-800 tabular-nums">
-                            {assignedProps.length} {assignedProps.length === 1 ? 'Site Assigned' : 'Sites Assigned'}
                         {/* Assigned Sites Chips */}
                         <div className="space-y-1.5 mb-5">
                           <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
                             Assigned Portfolio
                           </span>
 
-                          <form action={toggleUserStatusFormAction}>
-                            <input type="hidden" name="user_id" value={manager.id} />
-                            <input type="hidden" name="current_status" value={String(isActive)} />
-                            <input type="hidden" name="redirect_path" value="/dashboard/team" />
-                            <button
-                              type="submit"
-                              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition border shadow-xs ${
-                                isActive
-                                  ? 'bg-white hover:bg-rose-50 text-rose-700 border-rose-200'
-                                  : 'bg-emerald-600 hover:bg-emerald-700 text-white border-transparent'
-                              }`}
-                            >
-                              {isActive ? 'Suspend User' : 'Reactivate'}
-                            </button>
-                          </form>
                           {assignedProps.length === 0 ? (
                             <span className="text-[11px] text-amber-800 bg-amber-50 px-2.5 py-1 rounded-lg border border-amber-200 inline-block">
                               ⚠️ No sites assigned. Delegation required.
@@ -378,14 +320,6 @@ export default async function TeamPage({
                         </div>
                       </div>
 
-                      {/* Currently Assigned Sites Badges */}
-                      <div className="mb-4">
-                        <span className="text-[10px] uppercase font-bold text-gray-400 block mb-1">
-                          Current Assigned Portfolio
-                        </span>
-                        {assignedProps.length === 0 ? (
-                          <span className="text-xs text-amber-700 italic bg-amber-50 px-2 py-1 rounded border border-amber-200 inline-block">
-                            ⚠️ No sites assigned. This coordinator cannot view site actions until delegated.
                       {/* Card Footer: Drawer Trigger & Suspension Toggle */}
                       <div className="pt-3 border-t border-slate-100 flex items-center justify-between gap-2">
                         {isActive ? (
@@ -400,18 +334,6 @@ export default async function TeamPage({
                           <span className="text-[11px] text-rose-700 font-medium">
                             Delegation disabled
                           </span>
-                        ) : (
-                          <div className="flex flex-wrap gap-1.5">
-                            {assignedProps.map((p) => (
-                              <span
-                                key={p.id}
-                                className="inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-800 border border-emerald-200"
-                              >
-                                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-                                {p.name}
-                              </span>
-                            ))}
-                          </div>
                         )}
 
                         <form action={toggleUserStatusFormAction}>
@@ -430,24 +352,6 @@ export default async function TeamPage({
                           </button>
                         </form>
                       </div>
-
-                      {/* UX Guardrail: Completely hide or disable Portfolio Assignment for Suspended Users */}
-                      {isActive ? (
-                        <PortfolioAssignmentDrawer
-                          managerId={manager.id}
-                          managerName={managerName}
-                          properties={propertyItems}
-                          managerNameMap={managerNameMapRecord}
-                          formAction={assignPropertiesFormAction}
-                        />
-                      ) : (
-                        <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-800 flex items-center gap-2">
-                          <span>🚫</span>
-                          <span className="font-medium">
-                            Portfolio delegation is disabled while this coordinator account is suspended.
-                          </span>
-                        </div>
-                      )}
                     </div>
                   )
                 })}
@@ -456,22 +360,6 @@ export default async function TeamPage({
           </div>
 
           {/* DELEGATION AUDIT TRAIL & ACCOUNTABILITY LOG */}
-          <div className="bg-white rounded-2xl shadow-sm border overflow-hidden">
-            <div className="p-5 border-b bg-slate-50 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <span className="p-1.5 bg-slate-200 text-slate-700 rounded-lg text-xs">
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
-                </span>
-                <div>
-                  <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wider">
-                    Delegation Audit Trail & History
-                  </h3>
-                  <p className="text-xs text-gray-500">
-                    Immutable log of portfolio reassignments to verify SLA accountability.
-                  </p>
-                </div>
           <section className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
             <div className="p-5 border-b border-slate-200 flex items-center justify-between">
               <div>
@@ -482,34 +370,26 @@ export default async function TeamPage({
                   Immutable log of portfolio reassignments to verify SLA accountability and operational transfers.
                 </p>
               </div>
-              <span className="text-xs font-mono px-2 py-0.5 rounded bg-slate-200 text-slate-800 font-semibold">
               <span className="text-xs font-mono px-2.5 py-1 rounded-full bg-slate-100 text-slate-800 font-semibold tabular-nums">
                 {assignmentLogs.length} Events
               </span>
             </div>
 
             {assignmentLogs.length === 0 ? (
-              <div className="p-6 text-center text-xs text-gray-400 italic">
               <div className="p-8 text-center text-xs text-slate-400 italic">
                 No delegation changes recorded yet. Real-time audit events will appear here when sites are assigned or unassigned.
               </div>
             ) : (
-              <div className="divide-y divide-gray-100 overflow-x-auto">
-                <table className="w-full text-left text-xs">
               <div className="overflow-x-auto">
                 <table className="w-full text-left text-xs whitespace-nowrap">
                   <thead>
-                    <tr className="bg-gray-50/70 text-[11px] font-semibold text-gray-500 uppercase border-b">
-                      <th className="p-3">Timestamp</th>
                     <tr className="bg-slate-50/80 text-[10px] font-semibold text-slate-500 uppercase tracking-wider border-b border-slate-200">
                       <th className="p-3 pl-5">Timestamp</th>
                       <th className="p-3">Property Site</th>
                       <th className="p-3">Delegated By</th>
-                      <th className="p-3">Assignment Change</th>
                       <th className="p-3 pr-5">Assignment Change</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-gray-100">
                   <tbody className="divide-y divide-slate-100">
                     {assignmentLogs.map((log) => {
                       const propName = propertyNameMap.get(log.property_id) || 'Property'
@@ -518,8 +398,6 @@ export default async function TeamPage({
                       const newManagerName = log.new_manager_id ? profileNameMap.get(log.new_manager_id) : 'Unassigned'
 
                       return (
-                        <tr key={log.id} className="hover:bg-slate-50/60 transition">
-                          <td className="p-3 text-gray-500 whitespace-nowrap font-mono text-[11px]">
                         <tr key={log.id} className="hover:bg-slate-50/60 transition-all duration-150">
                           <td className="p-3 pl-5 text-slate-500 font-mono text-[11px]">
                             {new Date(log.created_at).toLocaleString('en-US', {
@@ -529,20 +407,14 @@ export default async function TeamPage({
                               minute: '2-digit',
                             })}
                           </td>
-                          <td className="p-3 font-semibold text-slate-900 whitespace-nowrap">
                           <td className="p-3 font-bold text-slate-900">
                             {propName}
                           </td>
-                          <td className="p-3 text-slate-700 whitespace-nowrap">
-                            <span className="px-2 py-0.5 rounded bg-purple-50 text-purple-800 font-medium">
                           <td className="p-3 text-slate-700">
                             <span className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-800 font-medium text-[11px]">
                               {changedByName}
                             </span>
                           </td>
-                          <td className="p-3 whitespace-nowrap">
-                            <span className="text-gray-400">{oldManagerName}</span>
-                            <span className="mx-1.5 text-blue-600 font-bold">&rarr;</span>
                           <td className="p-3 pr-5">
                             <span className="text-slate-400">{oldManagerName}</span>
                             <span className="mx-2 text-slate-400 font-bold">&rarr;</span>
@@ -557,61 +429,23 @@ export default async function TeamPage({
                 </table>
               </div>
             )}
-          </div>
-
-          {/* Agency Owners Section */}
-          <div className="bg-white rounded-2xl shadow-sm border p-5">
-            <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wider mb-2">
-              Agency Owners & Executive Access
-            </h3>
-            <div className="divide-y divide-gray-100">
-              {ownerList.map((owner) => (
-                <div key={owner.id} className="py-2.5 flex items-center justify-between text-xs">
-                  <div>
-                    <span className="font-bold text-slate-800">
-                      {owner.first_name} {owner.last_name}
-                    </span>
-                    <span className="text-gray-400 block text-[11px]">Executive Oversight</span>
-                  </div>
-                  <span className="px-2.5 py-0.5 rounded-full font-semibold bg-purple-100 text-purple-800 text-[11px]">
-                    Owner
-                  </span>
-                </div>
-              ))}
-            </div>
-          </div>
           </section>
         </div>
 
-        {/* Right Column: Invite New Property Manager Form */}
-        <div>
-          <div className="bg-white rounded-2xl shadow-sm border p-6 sticky top-8">
-            <div className="flex items-center gap-2 mb-3">
-              <span className="p-1.5 bg-blue-50 text-blue-700 rounded-lg text-xs">
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z" />
-                </svg>
         {/* Right Column: Invite New Coordinator & Owners Overview */}
         <div className="space-y-6">
-          
           {/* Invite Form Card */}
           <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 sticky top-8 space-y-4">
             <div>
               <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 block mb-1">
                 Staff Onboarding
               </span>
-              <h2 className="text-lg font-bold text-slate-900">Invite Property Manager</h2>
               <h2 className="text-lg font-bold text-slate-900">Invite Property Coordinator</h2>
               <p className="text-xs text-slate-500 mt-1 leading-relaxed">
                 Send an email invite to onboard a new Property Coordinator. They will receive access to manage only the portfolio sites you delegate to them.
               </p>
             </div>
-            
-            <p className="text-xs text-gray-500 mb-5 leading-relaxed">
-              Send an email invite to onboard a new Property Coordinator. They will receive access to manage only the sites you assign to them.
-            </p>
 
-            <form action={inviteManager} className="flex flex-col gap-4 text-xs">
             <form action={inviteManager} className="flex flex-col gap-3.5 text-xs">
               <div>
                 <label className="block text-xs font-semibold mb-1 text-slate-700">First Name</label>
@@ -619,7 +453,6 @@ export default async function TeamPage({
                   name="first_name"
                   required
                   placeholder="e.g. Samuel"
-                  className="w-full rounded-lg px-3 py-2 border bg-gray-50 focus:bg-white text-xs"
                   className="w-full rounded-xl px-3.5 py-2.5 border border-slate-200 bg-slate-50/50 focus:bg-white text-xs focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-slate-900 transition"
                 />
               </div>
@@ -630,7 +463,6 @@ export default async function TeamPage({
                   name="last_name"
                   required
                   placeholder="e.g. Mwangi"
-                  className="w-full rounded-lg px-3 py-2 border bg-gray-50 focus:bg-white text-xs"
                   className="w-full rounded-xl px-3.5 py-2.5 border border-slate-200 bg-slate-50/50 focus:bg-white text-xs focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-slate-900 transition"
                 />
               </div>
@@ -642,17 +474,14 @@ export default async function TeamPage({
                   type="email"
                   required
                   placeholder="manager@agency.co.ke"
-                  className="w-full rounded-lg px-3 py-2 border bg-gray-50 focus:bg-white text-xs"
                   className="w-full rounded-xl px-3.5 py-2.5 border border-slate-200 bg-slate-50/50 focus:bg-white text-xs focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-slate-900 transition"
                 />
               </div>
 
               <button
                 type="submit"
-                className="mt-2 bg-slate-900 text-white rounded-lg px-4 py-2.5 hover:bg-slate-800 transition font-semibold text-xs shadow-sm"
                 className="mt-2 bg-slate-900 hover:bg-slate-800 hover:shadow-md text-white rounded-xl px-4 py-2.5 cursor-pointer transition-all duration-200 ease-in-out font-semibold text-xs shadow-xs flex items-center justify-center gap-1.5"
               >
-                Send Coordinator Invitation &rarr;
                 <span>Send Coordinator Invitation</span>
                 <span>&rarr;</span>
               </button>

@@ -1,16 +1,44 @@
 // app/dashboard/deposits/page.tsx
 import { createClient } from '@/utils/supabase/server'
-import { endLease } from './actions'
 import { getUserAgencyContext } from '@/utils/supabase/get-context'
 import Link from 'next/link'
 import ReleaseDepositButton from './components/ReleaseDepositButton'
+
+interface TenantRelation {
+  id?: string
+  first_name?: string | null
+  last_name?: string | null
+  email?: string | null
+  phone?: string | null
+}
+
+interface PropertyRelation {
+  id?: string
+  name?: string | null
+  location?: string | null
+}
+
+interface UnitRelation {
+  id?: string
+  unit_number?: string | null
+  base_rent?: number | null
+  properties?: PropertyRelation | null
+}
+
+interface LeaseRecord {
+  id: string
+  start_date: string
+  deposit_amount: number | null
+  is_active: boolean
+  agency_id: string | null
+  tenants: TenantRelation | null
+  units: UnitRelation | null
+}
 
 export default async function DepositsLedgerPage() {
   const supabase = await createClient()
   const { agencyId } = await getUserAgencyContext()
 
-  // Notice we added `id` inside the `units` block so we can pass it to the action
-  const { data: activeLeases } = await supabase
   // 1. Fetch active leases with deposit escrow scoped to this agency
   let query = supabase
     .from('leases')
@@ -18,7 +46,6 @@ export default async function DepositsLedgerPage() {
       id,
       start_date,
       deposit_amount,
-      tenants ( first_name, last_name, email ),
       is_active,
       agency_id,
       tenants (
@@ -31,7 +58,6 @@ export default async function DepositsLedgerPage() {
       units (
         id,
         unit_number,
-        properties ( name )
         base_rent,
         properties (
           id,
@@ -43,31 +69,23 @@ export default async function DepositsLedgerPage() {
     .eq('is_active', true)
     .order('start_date', { ascending: false })
 
-  const totalEscrow = activeLeases?.reduce(
-    (sum, lease) => sum + Number(lease.deposit_amount),
   if (agencyId) {
     query = query.eq('agency_id', agencyId)
   }
 
   const { data: activeLeasesData } = await query
-  const activeLeases = activeLeasesData || []
+  const activeLeases: LeaseRecord[] = (activeLeasesData as unknown as LeaseRecord[]) || []
 
   // Compute escrow macro metrics
-  const totalEscrow = activeLeases.reduce(
-    (sum, lease) => sum + Number(lease.deposit_amount || 0),
-    0
-  ) || 0
-  )
+  const totalEscrow =
+    activeLeases.reduce(
+      (sum: number, lease: LeaseRecord) => sum + Number(lease.deposit_amount || 0),
+      0
+    ) || 0
   const totalCount = activeLeases.length
   const averageDeposit = totalCount > 0 ? Math.round(totalEscrow / totalCount) : 0
 
   return (
-    <div className="p-4 md:p-8 text-slate-900 w-full">
-      <header className="mb-8 pb-4 border-b">
-        <h1 className="text-3xl font-bold">Deposit Escrow Ledger</h1>
-        <p className="text-sm text-gray-500 mt-1">
-          Track and verify all locked security deposits across your portfolio.
-        </p>
     <div className="p-4 md:p-8 text-slate-900 w-full max-w-7xl mx-auto space-y-8">
       {/* Header */}
       <header className="flex flex-col md:flex-row md:items-end justify-between pb-6 border-b border-slate-200 gap-4">
@@ -104,14 +122,6 @@ export default async function DepositsLedgerPage() {
         </div>
       </header>
 
-      <div className="mb-8 grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="bg-emerald-50 border border-emerald-100 p-6 rounded-lg shadow-sm">
-          <h3 className="text-emerald-800 text-sm font-semibold uppercase tracking-wider mb-2">
-            Total Funds in Escrow
-          </h3>
-          <p className="text-4xl font-bold text-emerald-900">
-            KES {totalEscrow.toLocaleString()}
-          </p>
       {/* Escrow Bento Metric Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
         {/* Card 1: Total Locked in Escrow */}
@@ -176,9 +186,6 @@ export default async function DepositsLedgerPage() {
         </div>
       </div>
 
-      <section className="bg-white rounded-lg shadow-sm border overflow-hidden">
-        <div className="p-4 md:p-6 border-b bg-gray-50 flex justify-between items-center">
-          <h2 className="text-lg font-semibold">Active Deposits</h2>
       {/* Active Deposits Premium Table Container */}
       <section className="bg-white shadow-sm border border-slate-200 rounded-xl overflow-hidden">
         <div className="p-5 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -193,9 +200,6 @@ export default async function DepositsLedgerPage() {
           </span>
         </div>
         
-        {!activeLeases || activeLeases.length === 0 ? (
-          <div className="p-8 text-center text-gray-500 italic">
-            No active deposits found.
         {activeLeases.length === 0 ? (
           <div className="p-12 text-center text-slate-500">
             <svg className="w-10 h-10 text-slate-300 mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -206,15 +210,8 @@ export default async function DepositsLedgerPage() {
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse whitespace-nowrap">
             <table className="w-full text-left border-collapse whitespace-nowrap text-xs">
               <thead>
-                <tr className="bg-white border-b text-sm text-gray-500">
-                  <th className="p-4 font-semibold">Tenant</th>
-                  <th className="p-4 font-semibold">Property & Unit</th>
-                  <th className="p-4 font-semibold">Lease Started</th>
-                  <th className="p-4 font-semibold text-right">Deposit Amount</th>
-                  <th className="p-4 font-semibold text-center">Actions</th>
                 <tr className="bg-slate-50/80 border-b border-slate-200 uppercase text-[10px] font-semibold text-slate-500 tracking-wider">
                   <th className="p-4 pl-6">Tenant Occupant</th>
                   <th className="p-4">Property & Unit</th>
@@ -223,42 +220,8 @@ export default async function DepositsLedgerPage() {
                   <th className="p-4 pr-6 text-right">Actions</th>
                 </tr>
               </thead>
-              <tbody>
-                {activeLeases.map((lease: any) => (
-                  <tr key={lease.id} className="border-b hover:bg-gray-50 transition">
-                    <td className="p-4">
-                      <p className="font-medium">
-                        {lease.tenants.first_name} {lease.tenants.last_name}
-                      </p>
-                      <p className="text-xs text-gray-500">{lease.tenants.email}</p>
-                    </td>
-                    <td className="p-4">
-                      <p className="font-medium text-gray-800">{lease.units.properties.name}</p>
-                      <p className="text-xs text-gray-500">Unit {lease.units.unit_number}</p>
-                    </td>
-                    <td className="p-4 text-gray-600 text-sm">
-                      {new Date(lease.start_date).toLocaleDateString()}
-                    </td>
-                    <td className="p-4 text-right font-bold text-slate-700">
-                      KES {Number(lease.deposit_amount).toLocaleString()}
-                    </td>
-                    <td className="p-4 text-center bg-gray-50/50">
-                      {/* The Form that triggers the Move-Out / Refund process */}
-                      <form action={endLease}>
-                        <input type="hidden" name="lease_id" value={lease.id} />
-                        <input type="hidden" name="unit_id" value={lease.units.id} />
-                        <button 
-                          type="submit" 
-                          className="text-sm bg-white border border-red-200 text-red-600 px-3 py-1 rounded-md hover:bg-red-50 hover:border-red-300 transition shadow-sm"
-                        >
-                          Refund & End Lease
-                        </button>
-                      </form>
-                    </td>
-                  </tr>
-                ))}
               <tbody className="divide-y divide-slate-100">
-                {activeLeases.map((lease: any) => {
+                {activeLeases.map((lease) => {
                   const tenant = lease.tenants
                   const tenantName = tenant
                     ? `${tenant.first_name || ''} ${tenant.last_name || ''}`.trim() || 'Valued Tenant'
@@ -314,6 +277,9 @@ export default async function DepositsLedgerPage() {
                         <ReleaseDepositButton
                           leaseId={lease.id}
                           unitId={lease.units?.id || ''}
+                          tenantId={tenant?.id || ''}
+                          propertyId={lease.units?.properties?.id || ''}
+                          tenantPhone={tenant?.phone || ''}
                           tenantName={tenantName}
                           unitNumber={unitNumber}
                           propertyName={propertyName}

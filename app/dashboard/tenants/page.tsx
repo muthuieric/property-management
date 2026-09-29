@@ -5,6 +5,21 @@ import Link from 'next/link'
 import { toggleUserStatusFormAction } from '@/app/dashboard/team/actions'
 import TenantAddTrigger from './components/TenantAddTrigger'
 
+interface TenantUnit {
+  id?: string
+  unit_number?: string | null
+  base_rent?: number | null
+  properties?: { name?: string | null } | { name?: string | null }[] | null
+}
+
+interface ActiveLease {
+  id: string
+  tenant_id: string | null
+  deposit_amount: number | null
+  is_active: boolean
+  units: TenantUnit | TenantUnit[] | null
+}
+
 export default async function TenantsPage({
   searchParams,
 }: {
@@ -60,8 +75,9 @@ export default async function TenantsPage({
     .eq('agency_id', agencyId)
     .eq('is_active', true)
 
-  const leaseMap = new Map<string, any>()
-  activeLeases?.forEach((l) => {
+  const typedLeases = (activeLeases as unknown as ActiveLease[]) || []
+  const leaseMap = new Map<string, ActiveLease>()
+  typedLeases.forEach((l) => {
     if (l.tenant_id) {
       leaseMap.set(l.tenant_id, l)
     }
@@ -74,10 +90,11 @@ export default async function TenantsPage({
   }).length
   const suspendedTenantsCount = tenants.length - activeTenantsCount
 
-  const totalContractedRent = activeLeases?.reduce((sum, l) => {
-    const rent = Number((l.units as any)?.base_rent || 0)
+  const totalContractedRent = typedLeases.reduce((sum, l) => {
+    const u = Array.isArray(l.units) ? l.units[0] : l.units
+    const rent = Number(u?.base_rent || 0)
     return sum + rent
-  }, 0) || 0
+  }, 0)
 
   const totalDepositsHeld = activeLeases?.reduce((sum, l) => {
     return sum + Number(l.deposit_amount || 0)
@@ -232,9 +249,10 @@ export default async function TenantsPage({
                   const isActive = tenant.is_active !== false && profileActive !== false
 
                   const lease = leaseMap.get(tenant.id)
-                  const unit = lease?.units
-                  const propertyName = unit?.properties?.name
-                  const rent = unit?.base_rent ? Number(unit.base_rent) : null
+                  const unitData = Array.isArray(lease?.units) ? lease.units[0] : lease?.units
+                  const propertyObj = Array.isArray(unitData?.properties) ? unitData.properties[0] : unitData?.properties
+                  const propertyName = propertyObj?.name
+                  const rent = unitData?.base_rent ? Number(unitData.base_rent) : null
                   const deposit = lease?.deposit_amount ? Number(lease.deposit_amount) : null
 
                   return (
@@ -278,13 +296,13 @@ export default async function TenantsPage({
 
                       {/* Leased Unit & Property */}
                       <td className="p-4 whitespace-nowrap">
-                        {unit ? (
+                        {unitData ? (
                           <div>
                             <p className="font-semibold text-slate-900">
                               {propertyName || 'Property Site'}
                             </p>
                             <span className="text-[11px] text-slate-500 block">
-                              Unit {unit.unit_number}
+                              Unit {unitData.unit_number}
                             </span>
                           </div>
                         ) : (
@@ -327,23 +345,21 @@ export default async function TenantsPage({
                         )}
                       </td>
 
-                      {/* Quick Actions (Ghost buttons styled with hover:bg-slate-100) */}
+                      {/* Quick Actions */}
                       <td className="p-4 pr-6 text-right whitespace-nowrap">
                         <div className="flex items-center justify-end gap-1.5">
                           {/* View Ledger Ghost Button */}
                           <Link
                             href={`/dashboard/financials?tenant_id=${tenant.id}`}
-                            className="px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-700 hover:text-slate-900 hover:bg-slate-100 transition inline-flex items-center"
                             className="px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-700 hover:text-slate-900 hover:bg-slate-100 cursor-pointer transition-all duration-200 ease-in-out inline-flex items-center"
                           >
                             View Ledger
                           </Link>
 
                           {/* + Create Lease (if active and unleased) */}
-                          {isActive && !unit && (
+                          {isActive && !unitData && (
                             <Link
                               href={`/dashboard/leases/new?tenant_id=${tenant.id}`}
-                              className="px-2.5 py-1.5 rounded-lg text-xs font-semibold text-emerald-700 hover:text-emerald-800 hover:bg-slate-100 transition inline-flex items-center"
                               className="px-2.5 py-1.5 rounded-lg text-xs font-semibold text-emerald-700 hover:text-emerald-800 hover:bg-slate-100 cursor-pointer transition-all duration-200 ease-in-out inline-flex items-center"
                             >
                               + Lease
@@ -358,7 +374,6 @@ export default async function TenantsPage({
                               <input type="hidden" name="redirect_path" value="/dashboard/tenants" />
                               <button
                                 type="submit"
-                                className={`px-2.5 py-1.5 rounded-lg text-xs font-medium hover:bg-slate-100 transition ${
                                 className={`px-2.5 py-1.5 rounded-lg text-xs font-medium hover:bg-slate-100 cursor-pointer transition-all duration-200 ease-in-out ${
                                   isActive
                                     ? 'text-slate-600 hover:text-rose-700'
