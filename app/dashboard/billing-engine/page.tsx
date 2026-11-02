@@ -16,6 +16,7 @@ import { cn } from '@/lib/utils'
 import {
   getBillingPreview,
   generateInvoices,
+  createCreditNote,
   getProperties,
   type BillingPreviewRow,
 } from './actions'
@@ -25,7 +26,21 @@ const columnHelper = createColumnHelper<BillingPreviewRow>()
 const COLUMNS = [
   columnHelper.accessor('unitNumber', {
     header: 'Unit',
-    meta: { width: '120px' },
+    meta: { width: '140px' },
+    cell: (info) => {
+      const row = info.row.original as BillingPreviewRow
+      const isMerged = row.isMergedUnit
+      return (
+        <div className="flex items-center gap-1">
+          {info.getValue()}
+          {isMerged && (
+            <span className="text-[9px] bg-emerald-100 text-emerald-800 px-1.5 py-0 rounded">
+              Merged
+            </span>
+          )}
+        </div>
+      )
+    },
   }),
   columnHelper.accessor('tenantName', {
     header: 'Tenant',
@@ -179,6 +194,43 @@ export default function BillingEnginePage() {
           `Skipped ${result.skipped} already-invoiced lease(s). ` +
           `Total value: KES ${result.totalAmount.toLocaleString()}`
       )
+    } catch (err) {
+      console.error(err)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const [creditNoteDialog, setCreditNoteDialog] = useState<boolean>(false)
+  const [creditNoteInvoiceId, setCreditNoteInvoiceId] = useState<string | null>(null)
+  const [creditNoteAmount, setCreditNoteAmount] = useState('')
+  const [creditNoteVat, setCreditNoteVat] = useState('')
+  const [creditNoteReason, setCreditNoteReason] = useState('')
+
+  const handleCreateCreditNote = async () => {
+    if (!creditNoteInvoiceId || !creditNoteAmount || !creditNoteReason) {
+      alert('Please fill in all fields')
+      return
+    }
+    setLoading(true)
+    try {
+      const result = await createCreditNote({
+        originalInvoiceId: creditNoteInvoiceId,
+        amount: Number(creditNoteAmount),
+        vatAmount: Number(creditNoteVat || 0),
+        reason: creditNoteReason,
+      })
+      if (result.success) {
+        alert(`Credit note ${result.creditNumber} created successfully.`)
+        setCreditNoteDialog(false)
+        setCreditNoteInvoiceId(null)
+        setCreditNoteAmount('')
+        setCreditNoteVat('')
+        setCreditNoteReason('')
+        runPreview()
+      } else {
+        alert(`Failed: ${result.error}`)
+      }
     } catch (err) {
       console.error(err)
     } finally {
@@ -388,6 +440,80 @@ export default function BillingEnginePage() {
           </div>
         )}
       </div>
+
+      {/* CREDIT NOTE DIALOG */}
+      {creditNoteDialog && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+          <div className="bg-white rounded-xl p-6 shadow-2xl w-full max-w-md mx-4">
+            <h2 className="text-xl font-bold text-slate-900 mb-4">Create Credit Note</h2>
+            <div className="space-y-3">
+              <div>
+                <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider block mb-1.5">
+                  Invoice
+                </label>
+                <input
+                  type="text"
+                  value={creditNoteInvoiceId ?? ''}
+                  readOnly
+                  className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs"
+                />
+              </div>
+              <div>
+                <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider block mb-1.5">
+                  Base Rent Amount (KES)
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={creditNoteAmount}
+                  onChange={(e) => setCreditNoteAmount(e.target.value)}
+                  className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs focus:border-emerald-500 focus:outline-none"
+                />
+              </div>
+              <div>
+                <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider block mb-1.5">
+                  VAT Amount (KES)
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={creditNoteVat}
+                  onChange={(e) => setCreditNoteVat(e.target.value)}
+                  className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs focus:border-emerald-500 focus:outline-none"
+                />
+              </div>
+              <div>
+                <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider block mb-1.5">
+                  Reason
+                </label>
+                <textarea
+                  value={creditNoteReason}
+                  onChange={(e) => setCreditNoteReason(e.target.value)}
+                  rows={3}
+                  className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs focus:border-emerald-500 focus:outline-none"
+                />
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 mt-6">
+              <button
+                onClick={() => setCreditNoteDialog(false)}
+                className="rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleCreateCreditNote}
+                disabled={loading}
+                className="rounded-lg border px-4 py-2.5 text-xs font-semibold transition-colors disabled:opacity-50 border-transparent bg-emerald-600 text-white hover:bg-emerald-700"
+              >
+                {loading ? 'Creating…' : 'Issue Credit Note'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

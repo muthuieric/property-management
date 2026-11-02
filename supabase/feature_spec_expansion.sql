@@ -47,6 +47,7 @@ CREATE TABLE IF NOT EXISTS public.units (
     square_footage NUMERIC(10, 2),
     is_occupied BOOLEAN DEFAULT false,
     property_id UUID REFERENCES public.properties(id) ON DELETE CASCADE,
+    parent_unit_id UUID REFERENCES public.units(id),
     created_at TIMESTAMPTZ DEFAULT now()
 );
 
@@ -97,6 +98,7 @@ CREATE TABLE IF NOT EXISTS public.invoices (
     vat_amount NUMERIC(10, 2) DEFAULT 0.00,
     pdf_url TEXT,
     emailed_at TIMESTAMPTZ,
+    invoice_number TEXT,
     created_at TIMESTAMPTZ DEFAULT now(),
     created_by UUID REFERENCES auth.users(id) ON DELETE SET NULL,
     CONSTRAINT chk_invoices_status CHECK (status IN ('unpaid', 'partial', 'paid')),
@@ -172,7 +174,35 @@ CREATE TABLE IF NOT EXISTS public.arrears_interest (
 );
 
 -- -----------------------------------------------------------------------------
--- 5. PERFORMANCE INDEXES
+-- 5. invoice_sequences: auto-incrementing unbroken invoice number sequence per agency
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS public.invoice_sequences (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    agency_id UUID NOT NULL REFERENCES public.agencies(id) ON DELETE CASCADE,
+    prefix TEXT NOT NULL DEFAULT 'INV',
+    last_number INT NOT NULL DEFAULT 0,
+    created_at TIMESTAMPTZ DEFAULT now(),
+    UNIQUE (agency_id)
+);
+
+-- -----------------------------------------------------------------------------
+-- 6. credit_notes: negative double-entry bookkeeping for VAT reversals
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS public.credit_notes (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    agency_id UUID NOT NULL REFERENCES public.agencies(id) ON DELETE CASCADE,
+    original_invoice_id UUID REFERENCES public.invoices(id) ON DELETE SET NULL,
+    credit_number TEXT NOT NULL,
+    amount NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
+    vat_amount NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
+    reason TEXT,
+    status TEXT NOT NULL DEFAULT 'issued',
+    created_by UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+    created_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- -----------------------------------------------------------------------------
+-- 7. ledger_entries: double-entry tenant ledger
 -- -----------------------------------------------------------------------------
 CREATE INDEX IF NOT EXISTS idx_units_square_footage ON public.units(square_footage);
 CREATE INDEX IF NOT EXISTS idx_leases_escalation ON public.leases(escalation_percentage);
@@ -187,6 +217,11 @@ CREATE INDEX IF NOT EXISTS idx_ledger_entries_tenant ON public.ledger_entries(te
 CREATE INDEX IF NOT EXISTS idx_ledger_entries_agency ON public.ledger_entries(agency_id, entry_date);
 CREATE INDEX IF NOT EXISTS idx_arrears_interest_tenant_period ON public.arrears_interest(tenant_id, period_month);
 CREATE INDEX IF NOT EXISTS idx_arrears_interest_agency ON public.arrears_interest(agency_id, period_month);
+CREATE INDEX IF NOT EXISTS idx_units_parent ON public.units(parent_unit_id);
+CREATE INDEX IF NOT EXISTS idx_invoice_sequences_agency ON public.invoice_sequences(agency_id);
+CREATE INDEX IF NOT EXISTS idx_credit_notes_agency ON public.credit_notes(agency_id);
+CREATE INDEX IF NOT EXISTS idx_credit_notes_original_invoice ON public.credit_notes(original_invoice_id);
+CREATE INDEX IF NOT EXISTS idx_invoices_invoice_number ON public.invoices(invoice_number);
 
 -- -----------------------------------------------------------------------------
 -- 6. ROW-LEVEL SECURITY
@@ -272,6 +307,46 @@ CREATE POLICY "Tenants can view own arrears interest"
             WHERE t.id = arrears_interest.tenant_id
               AND t.user_id = auth.uid()
         )
+    );
+
+-- 6d. credit_notes
+ALTER TABLE public.credit_notes ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Agency staff can view credit notes" ON public.credit_notes;
+DROP POLICY IF EXISTS "Agency staff can manage credit notes" ON public.credit_notes;
+CREATE POLICY "Agency staff can view credit notes"
+    ON public.credit_notes FOR SELECT TO authenticated
+    USING (
+        agency_id = public.get_auth_agency_id()
+    );
+CREATE POLICY "Agency staff can manage credit notes"
+    ON public.credit_notes FOR ALL TO authenticated
+    USING (
+        agency_id = public.get_auth_agency_id()
+        AND public.get_auth_role() = 'agency_owner'
+    )
+    WITH CHECK (
+        agency_id = public.get_auth_agency_id()
+        AND public.get_auth_role() = 'agency_owner'
+    );
+
+-- 6e. invoice_sequences
+ALTER TABLE public.invoice_sequences ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Agency staff can view invoice sequences" ON public.invoice_sequences;
+DROP POLICY IF EXISTS "Agency staff can manage invoice sequences" ON public.invoice_sequences;
+CREATE POLICY "Agency staff can view invoice sequences"
+    ON public.invoice_sequences FOR SELECT TO authenticated
+    USING (
+        agency_id = public.get_auth_agency_id()
+    );
+CREATE POLICY "Agency staff can manage invoice sequences"
+    ON public.invoice_sequences FOR ALL TO authenticated
+    USING (
+        agency_id = public.get_auth_agency_id()
+        AND public.get_auth_role() = 'agency_owner'
+    )
+    WITH CHECK (
+        agency_id = public.get_auth_agency_id()
+        AND public.get_auth_role() = 'agency_owner'
     );
 
 -- -----------------------------------------------------------------------------

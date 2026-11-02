@@ -23,6 +23,8 @@ export interface BillingPreviewRow {
   interestPenalty: number
   totalAmount: number
   alreadyInvoiced: boolean
+  isMergedUnit: boolean
+  mergedUnitNumbers: string[]
 }
 
 export interface PropertyOption {
@@ -44,6 +46,7 @@ interface LeaseRow {
     unit_number: string | null
     base_rent: number | null
     square_footage: number | null
+    parent_unit_id: string | null
     properties: { id: string; name: string } | null
   } | null
   tenants: {
@@ -53,11 +56,24 @@ interface LeaseRow {
   } | null
 }
 
+interface UnitRow {
+  id: string
+  unit_number: string | null
+  square_footage: number | null
+  parent_unit_id: string | null
+}
+
 export interface BillingGenerateResult {
   generated: number
   skipped: number
   totalAmount: number
   rows: BillingPreviewRow[]
+}
+
+export interface CreditNoteResult {
+  success: boolean
+  creditNumber: string | null
+  error: string | null
 }
 
 const VAT_RATE = 16
@@ -88,6 +104,44 @@ function yearsElapsed(startDate: string | null, billingMonth: string): number {
 function applyEscalation(amount: number, rate: number, years: number): number {
   if (years <= 0 || rate <= 0) return money(amount)
   return money(amount * Math.pow(1 + rate, years))
+}
+
+/**
+ * Given a unit, find all units in its merge group (itself + children).
+ * Returns the merged unit numbers and total square footage.
+ */
+function getMergeGroup(
+  unit: UnitRow | null,
+  allUnits: UnitRow[]
+): { unitNumbers: string[]; totalSquareFootage: number; baseUnit: UnitRow | null } {
+  if (!unit) return { unitNumbers: [], totalSquareFootage: 0, baseUnit: null }
+
+  // Find this unit's root parent (if it's a child, find the parent)
+  let root = unit
+  let visited = new Set<string>()
+  while (root.parent_unit_id && !visited.has(root.parent_unit_id)) {
+    visited.add(root.parent_unit_id)
+    const parent = allUnits.find((u) => u.id === root.parent_unit_id)
+    if (!parent) break
+    root = parent
+  }
+
+  // Collect all children of the root (including root itself)
+  const groupUnits = allUnits.filter(
+    (u) => u.id === root.id || u.parent_unit_id === root.id
+  )
+
+  const unitNumbers = groupUnits
+    .map((u) => u.unit_number)
+    .filter((n): n is string => n !== null)
+    .sort()
+
+  const totalSquareFootage = groupUnits.reduce(
+    (sum, u) => sum + (Number(u.square_footage) || 0),
+    0
+  )
+
+  return { unitNumbers, totalSquareFootage, baseUnit: root }
 }
 
 /**
@@ -123,6 +177,58 @@ async function getInterestPenalty(
   return money(totalPenalty)
 }
 
+/**
+ * Atomically generate the next invoice number for an agency.
+ * Format: PREFIX/NNNN (e.g., KHL/1118)
+ */
+async function nextInvoiceNumber(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  agencyId: string
+): Promise<string | null> {
+  // Ensure a sequence row exists
+  const { data: existing } = await supabase
+    .from('invoice_sequences')
+    .select('*')
+    .eq('agency_id', agencyId)
+    .single()
+
+  let prefix = 'INV'
+  let lastNumber = 0
+
+  if (existing) {
+    prefix = existing.prefix || 'INV'
+    lastNumber = Number(existing.last_number || 0)
+  }
+
+  const nextNumber = lastNumber + 1
+  const invoiceNumber = `${prefix}/${nextNumber}`
+
+  if (existing) {
+    const { error } = await supabase
+      .from('invoice_sequences')
+      .update({ last_number: nextNumber })
+      .eq('agency_id', agencyId)
+    if (error) {
+      console.error('nextInvoiceNumber update error:', error)
+      return null
+    }
+  } else {
+    const { error } = await supabase
+      .from('invoice_sequences')
+      .insert({
+        agency_id: agencyId,
+        prefix,
+        last_number: nextNumber,
+      })
+    if (error) {
+      console.error('nextInvoiceNumber insert error:', error)
+      return null
+    }
+  }
+
+  return invoiceNumber
+}
+
 export async function getBillingPreview({
   billingMonth,
   serviceChargeRate,
@@ -153,6 +259,7 @@ export async function getBillingPreview({
         unit_number,
         base_rent,
         square_footage,
+        parent_unit_id,
         properties ( id, name )
       ),
       tenants (
@@ -171,6 +278,14 @@ export async function getBillingPreview({
     return []
   }
 
+  // Fetch all units for this agency to build merge groups
+  const { data: allUnits, error: unitsErr } = await supabase
+    .from('units')
+    .select('id, unit_number, square_footage, parent_unit_id')
+    .eq('agency_id', agencyId)
+
+  const unitsMap = (allUnits || []) as UnitRow[]
+
   const { data: existing } = await supabase
     .from('invoices')
     .select('lease_id')
@@ -188,9 +303,16 @@ export async function getBillingPreview({
 
     if (propertyId && property?.id !== propertyId) continue
 
+    // Build merge group for this unit
+    const mergeGroup = getMergeGroup(unit, unitsMap)
+    const isMerged = mergeGroup.unitNumbers.length > 1
+
+    // Use merged square footage for service charge
+    const effectiveSquareFootage = mergeGroup.totalSquareFootage > 0 ? mergeGroup.totalSquareFootage : (unit?.square_footage ? Number(unit.square_footage) : 0)
+    const displayUnitNumber = isMerged ? mergeGroup.unitNumbers.join(', ') : unit?.unit_number ?? null
+
     const baseRent = Number(unit?.base_rent || 0)
-    const squareFootage = unit?.square_footage ? Number(unit.square_footage) : null
-    const rawServiceCharge = money((squareFootage || 0) * serviceChargeRate)
+    const rawServiceCharge = money(effectiveSquareFootage * serviceChargeRate)
 
     const escalationPct = Number(lease.escalation_percentage || 0)
     const years = yearsElapsed(lease.start_date, billingMonth)
@@ -215,11 +337,11 @@ export async function getBillingPreview({
       leaseId: lease.id,
       tenantId: lease.tenant_id,
       tenantName: `${tenant?.first_name || ''} ${tenant?.last_name || ''}`.trim() || 'Unknown',
-      unitNumber: unit?.unit_number ?? null,
+      unitNumber: displayUnitNumber,
       propertyId: property?.id ?? null,
       propertyName: property?.name ?? null,
       baseRent: escalatedBaseRent,
-      squareFootage,
+      squareFootage: effectiveSquareFootage || null,
       serviceChargeRate: serviceChargeRate,
       serviceChargeAmount: escalatedServiceCharge,
       escalationPercentage: escalationPct,
@@ -231,6 +353,8 @@ export async function getBillingPreview({
       interestPenalty,
       totalAmount,
       alreadyInvoiced: existingLeaseIds.has(lease.id),
+      isMergedUnit: isMerged,
+      mergedUnitNumbers: mergeGroup.unitNumbers,
     })
   }
 
@@ -255,7 +379,20 @@ export async function generateInvoices({
     propertyId,
   })
 
-  const toInsert = preview.filter((r) => !r.alreadyInvoiced).map((r) => ({
+  const toInsert = preview.filter((r) => !r.alreadyInvoiced)
+
+  // Generate invoice numbers in sequence
+  const invoicesWithNumbers = await Promise.all(
+    toInsert.map(async (r) => {
+      const invoiceNumber = await nextInvoiceNumber(supabase, agencyId)
+      return {
+        ...r,
+        invoiceNumber,
+      }
+    })
+  )
+
+  const toDbInsert = invoicesWithNumbers.map((r) => ({
     agency_id: agencyId,
     property_id: r.propertyId,
     tenant_id: r.tenantId,
@@ -272,12 +409,13 @@ export async function generateInvoices({
     status: 'unpaid',
     vat_rate: r.vatRate,
     vat_amount: r.vatAmount,
+    invoice_number: r.invoiceNumber,
     created_by: userId,
   }))
 
   let generated = 0
-  if (toInsert.length > 0) {
-    const { error } = await supabase.from('invoices').insert(toInsert)
+  if (toDbInsert.length > 0) {
+    const { error } = await supabase.from('invoices').insert(toDbInsert)
     if (error) {
       console.error('generateInvoices insert error:', error)
       return {
@@ -287,7 +425,7 @@ export async function generateInvoices({
         rows: preview,
       }
     }
-    generated = toInsert.length
+    generated = toDbInsert.length
   }
 
   const totalAmount = money(
@@ -300,6 +438,94 @@ export async function generateInvoices({
     totalAmount,
     rows: preview,
   }
+}
+
+export async function createCreditNote({
+  originalInvoiceId,
+  amount,
+  vatAmount,
+  reason,
+}: {
+  originalInvoiceId: string
+  amount: number
+  vatAmount: number
+  reason: string
+}): Promise<CreditNoteResult> {
+  const { agencyId, userId } = await getUserAgencyContext()
+  const supabase = await createClient()
+
+  // Fetch the original invoice to verify agency and get details
+  const { data: originalInvoice, error: invError } = await supabase
+    .from('invoices')
+    .select('id, agency_id, invoice_number, total_amount, vat_amount, tenant_id')
+    .eq('id', originalInvoiceId)
+    .eq('agency_id', agencyId)
+    .single()
+
+  if (invError || !originalInvoice) {
+    return { success: false, creditNumber: null, error: 'Original invoice not found' }
+  }
+
+  // Generate credit number using sequence-like approach
+  const { data: existingSeq } = await supabase
+    .from('invoice_sequences')
+    .select('prefix')
+    .eq('agency_id', agencyId)
+    .single()
+
+  const prefix = (existingSeq?.prefix || 'INV').replace('INV', 'CN')
+  const creditNumber = `${prefix}/CN-${Date.now().toString().slice(-6)}`
+
+  const creditAmount = money(amount)
+  const creditVat = money(vatAmount)
+
+  // Insert credit note (negative amount for double-entry reversal)
+  const { data: creditNote, error: cnError } = await supabase
+    .from('credit_notes')
+    .insert({
+      agency_id: agencyId,
+      original_invoice_id: originalInvoiceId,
+      credit_number: creditNumber,
+      amount: -Math.abs(creditAmount), // negative for bookkeeping reversal
+      vat_amount: -Math.abs(creditVat),
+      reason,
+      status: 'issued',
+      created_by: userId,
+    })
+    .select()
+    .single()
+
+  if (cnError) {
+    console.error('createCreditNote error:', cnError)
+    return { success: false, creditNumber: null, error: cnError.message }
+  }
+
+  // Create double-entry ledger entries for the credit note
+  // Debit: VAT Output (reversing liability), Credit: Debtors/Accounts Receivable
+  await supabase.from('ledger_entries').insert([
+    {
+      agency_id: agencyId,
+      tenant_id: originalInvoice.tenant_id ?? null,
+      invoice_id: originalInvoiceId,
+      debit_account: 'VAT Output',
+      credit_account: 'Accounts Receivable',
+      amount: creditVat,
+      entry_date: new Date().toISOString().slice(0, 10),
+      reference: creditNumber,
+    },
+    {
+      agency_id: agencyId,
+      tenant_id: originalInvoice.tenant_id ?? null,
+      invoice_id: originalInvoiceId,
+      debit_account: 'Accounts Receivable',
+      credit_account: 'Rent Income',
+      amount: creditAmount,
+      entry_date: new Date().toISOString().slice(0, 10),
+      reference: creditNumber,
+    },
+  ])
+
+  return { success: true, creditNumber, error: null }
 }
 
 export async function getProperties(): Promise<PropertyOption[]> {
