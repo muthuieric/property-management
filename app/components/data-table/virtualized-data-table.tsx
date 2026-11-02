@@ -248,7 +248,7 @@ export function VirtualizedDataTable<TData extends RowData>({
                 row: row.original,
                 rowIndex: row.index,
               })
-            : flexRender(column.columnDef.cell as React.ReactNode, { value: cell.getValue() })
+            : cell.renderValue()
           return (
             <div
               key={column.id}
