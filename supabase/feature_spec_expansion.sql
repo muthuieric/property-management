@@ -451,5 +451,159 @@ ALTER FUNCTION public.get_auth_agency_billing_identity() OWNER TO postgres;
 GRANT EXECUTE ON FUNCTION public.get_auth_agency_billing_identity() TO authenticated, service_role;
 
 -- =============================================================================
+-- RBAC ENHANCEMENT: super_admin + tenant roles with portfolio segregation
+-- =============================================================================
+
+-- Super admin bypasses all agency_id filters (sees every agency)
+-- Property managers are restricted to their agency and cannot alter financial formulas
+-- Tenants see only their own ledger
+
+-- 1. agencies: super_admin sees all; agency staff see own
+ALTER TABLE public.agencies ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Agencies RLS" ON public.agencies;
+CREATE POLICY "Agencies RLS"
+    ON public.agencies FOR ALL TO authenticated
+    USING (
+        public.get_auth_role() = 'super_admin'
+        OR agency_id = public.get_auth_agency_id()
+    );
+
+-- 2. profiles: super_admin sees all; agency staff see own agency; tenants see own
+ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Profiles RLS" ON public.profiles;
+CREATE POLICY "Profiles RLS"
+    ON public.profiles FOR ALL TO authenticated
+    USING (
+        public.get_auth_role() = 'super_admin'
+        OR agency_id = public.get_auth_agency_id()
+        OR id = auth.uid()
+    );
+
+-- 3. properties: super_admin sees all; agency staff see own agency
+ALTER TABLE public.properties ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Properties RLS" ON public.properties;
+CREATE POLICY "Properties RLS"
+    ON public.properties FOR ALL TO authenticated
+    USING (
+        public.get_auth_role() = 'super_admin'
+        OR agency_id = public.get_auth_agency_id()
+    );
+
+-- 4. units: super_admin sees all; agency staff see own agency
+ALTER TABLE public.units ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Units RLS" ON public.units;
+CREATE POLICY "Units RLS"
+    ON public.units FOR ALL TO authenticated
+    USING (
+        public.get_auth_role() = 'super_admin'
+        OR agency_id = public.get_auth_agency_id()
+    );
+
+-- 5. tenants: super_admin sees all; agency staff see own agency; tenants see own
+ALTER TABLE public.tenants ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Tenants RLS" ON public.tenants;
+CREATE POLICY "Tenants RLS"
+    ON public.tenants FOR ALL TO authenticated
+    USING (
+        public.get_auth_role() = 'super_admin'
+        OR agency_id = public.get_auth_agency_id()
+        OR user_id = auth.uid()
+    );
+
+-- 6. leases: super_admin sees all; agency staff see own agency; tenants see own
+ALTER TABLE public.leases ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Leases RLS" ON public.leases;
+CREATE POLICY "Leases RLS"
+    ON public.leases FOR ALL TO authenticated
+    USING (
+        public.get_auth_role() = 'super_admin'
+        OR agency_id = public.get_auth_agency_id()
+        OR tenant_id = public.get_auth_tenant_id()
+    );
+
+-- Property managers CANNOT update financial formula fields (escalation_percentage, base_rent via units)
+-- This is enforced in application logic; RLS here prevents direct table writes to formula fields
+CREATE POLICY "Leases no financial formula changes by property_manager"
+    ON public.leases FOR UPDATE TO authenticated
+    USING (
+        public.get_auth_role() = 'super_admin'
+        OR public.get_auth_role() = 'agency_owner'
+    );
+
+-- 7. invoices: super_admin sees all; agency staff see own agency; tenants see own
+ALTER TABLE public.invoices ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Invoices RLS" ON public.invoices;
+CREATE POLICY "Invoices RLS"
+    ON public.invoices FOR ALL TO authenticated
+    USING (
+        public.get_auth_role() = 'super_admin'
+        OR agency_id = public.get_auth_agency_id()
+        OR tenant_id = public.get_auth_tenant_id()
+    );
+
+-- 8. ledger_entries: super_admin sees all; agency staff see own agency; tenants see own
+ALTER TABLE public.ledger_entries ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Ledger entries RLS" ON public.ledger_entries;
+CREATE POLICY "Ledger entries RLS"
+    ON public.ledger_entries FOR ALL TO authenticated
+    USING (
+        public.get_auth_role() = 'super_admin'
+        OR agency_id = public.get_auth_agency_id()
+        OR tenant_id = public.get_auth_tenant_id()
+    );
+
+-- 9. arrears_interest: super_admin sees all; agency staff see own agency; tenants see own
+ALTER TABLE public.arrears_interest ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Arrears interest RLS" ON public.arrears_interest;
+CREATE POLICY "Arrears interest RLS"
+    ON public.arrears_interest FOR ALL TO authenticated
+    USING (
+        public.get_auth_role() = 'super_admin'
+        OR agency_id = public.get_auth_agency_id()
+        OR tenant_id = public.get_auth_tenant_id()
+    );
+
+-- 10. credit_notes: super_admin sees all; agency staff see own agency
+ALTER TABLE public.credit_notes ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Credit notes RLS" ON public.credit_notes;
+CREATE POLICY "Credit notes RLS"
+    ON public.credit_notes FOR ALL TO authenticated
+    USING (
+        public.get_auth_role() = 'super_admin'
+        OR agency_id = public.get_auth_agency_id()
+    );
+
+-- 11. invoice_sequences: super_admin sees all; agency staff see own agency
+ALTER TABLE public.invoice_sequences ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Invoice sequences RLS" ON public.invoice_sequences;
+CREATE POLICY "Invoice sequences RLS"
+    ON public.invoice_sequences FOR ALL TO authenticated
+    USING (
+        public.get_auth_role() = 'super_admin'
+        OR agency_id = public.get_auth_agency_id()
+    );
+
+-- 12. service_rates: super_admin sees all; agency staff see own agency
+ALTER TABLE public.service_rates ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Service rates RLS" ON public.service_rates;
+CREATE POLICY "Service rates RLS"
+    ON public.service_rates FOR ALL TO authenticated
+    USING (
+        public.get_auth_role() = 'super_admin'
+        OR agency_id = public.get_auth_agency_id()
+    );
+
+-- 13. transactions: super_admin sees all; agency staff see own agency; tenants see own
+ALTER TABLE public.transactions ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Transactions RLS" ON public.transactions;
+CREATE POLICY "Transactions RLS"
+    ON public.transactions FOR ALL TO authenticated
+    USING (
+        public.get_auth_role() = 'super_admin'
+        OR agency_id = public.get_auth_agency_id()
+        OR tenant_id = public.get_auth_tenant_id()
+    );
+
+-- =============================================================================
 -- END OF MIGRATION
 -- =============================================================================

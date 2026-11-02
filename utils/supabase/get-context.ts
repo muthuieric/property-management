@@ -2,7 +2,14 @@
 import { createClient } from './server'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
 
-export async function getUserAgencyContext() {
+export interface UserAgencyContext {
+  userId: string
+  agencyId: string
+  role: string
+  isSuperAdmin: boolean
+}
+
+export async function getUserAgencyContext(): Promise<UserAgencyContext> {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   
@@ -18,10 +25,12 @@ export async function getUserAgencyContext() {
     .single()
 
   if (profile) {
+    const isSuperAdmin = profile.role === 'super_admin'
     return {
       userId: user.id,
       agencyId: profile.agency_id,
-      role: profile.role
+      role: profile.role,
+      isSuperAdmin,
     }
   }
 
@@ -39,10 +48,12 @@ export async function getUserAgencyContext() {
 
   if (adminProfile) {
     console.log('✅ Bypassed RLS to fetch profile successfully.')
+    const isSuperAdmin = adminProfile.role === 'super_admin'
     return {
       userId: user.id,
       agencyId: adminProfile.agency_id,
-      role: adminProfile.role
+      role: adminProfile.role,
+      isSuperAdmin,
     }
   }
 
@@ -67,6 +78,7 @@ export async function getUserAgencyContext() {
   return {
     userId: user.id,
     agencyId: masterAgencyId,
-    role: 'agency_owner'
+    role: 'agency_owner',
+    isSuperAdmin: false,
   }
 }

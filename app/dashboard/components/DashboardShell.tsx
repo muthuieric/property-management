@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import DashboardSidebarNav from './DashboardSidebarNav'
 import DashboardTopHeader from './DashboardTopHeader'
+import { getAgencies } from '@/app/dashboard/agencies/actions'
 
 interface DashboardShellProps {
   children: React.ReactNode
@@ -19,6 +20,8 @@ export default function DashboardShell({
   userName,
 }: DashboardShellProps) {
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
+  const [agencies, setAgencies] = useState<Array<{ id: string; name: string }>>([])
+  const [currentAgency, setCurrentAgency] = useState<{ id: string; name: string } | null>(null)
 
   // Prevent background scroll when mobile nav is open
   useEffect(() => {
@@ -31,6 +34,26 @@ export default function DashboardShell({
       document.body.style.overflow = 'unset'
     }
   }, [mobileNavOpen])
+
+  // Fetch agencies for portfolio toggle
+  useEffect(() => {
+    ;(async () => {
+      try {
+        const ags = await getAgencies()
+        setAgencies(ags)
+        if (ags.length > 0 && !currentAgency) {
+          setCurrentAgency(ags[0])
+        }
+      } catch (err) {
+        console.error('Failed to fetch agencies:', err)
+      }
+    })()
+  }, [])
+
+  const handleAgencyChange = (agencyId: string) => {
+    const agency = agencies.find((a) => a.id === agencyId)
+    if (agency) setCurrentAgency(agency)
+  }
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col">
@@ -62,7 +85,12 @@ export default function DashboardShell({
 
         {/* Sidebar Nav Links */}
         <div className="flex-1 overflow-y-auto py-2">
-          <DashboardSidebarNav userRole={userRole} />
+          <DashboardSidebarNav
+            userRole={userRole}
+            currentAgency={currentAgency}
+            agencies={agencies}
+            onAgencyChange={handleAgencyChange}
+          />
         </div>
 
         {/* Institutional Trust Badge & Quick Sign Out */}
@@ -138,6 +166,9 @@ export default function DashboardShell({
               <DashboardSidebarNav
                 onNavigate={() => setMobileNavOpen(false)}
                 userRole={userRole}
+                currentAgency={currentAgency}
+                agencies={agencies}
+                onAgencyChange={handleAgencyChange}
               />
             </div>
 

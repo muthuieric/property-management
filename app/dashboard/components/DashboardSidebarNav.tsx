@@ -1,7 +1,8 @@
 'use client'
 
 import Link from 'next/link'
-import { usePathname } from 'next/navigation'
+import { usePathname, useRouter, useSearchParams } from 'next/navigation'
+import { createClient } from '@/utils/supabase/server'
 
 interface NavItem {
   name: string
@@ -10,6 +11,14 @@ interface NavItem {
   badge?: string
   exact?: boolean
   ownerOnly?: boolean
+}
+
+interface DashboardSidebarNavProps {
+  onNavigate?: () => void
+  userRole?: string
+  currentAgency?: { id: string; name: string } | null
+  agencies?: Array<{ id: string; name: string }>
+  onAgencyChange?: (agencyId: string) => void
 }
 
 const NAV_ITEMS: NavItem[] = [
@@ -233,13 +242,10 @@ const NAV_ITEMS: NavItem[] = [
   },
 ]
 
-interface DashboardSidebarNavProps {
-  onNavigate?: () => void
-  userRole?: string
-}
-
-export default function DashboardSidebarNav({ onNavigate, userRole }: DashboardSidebarNavProps) {
+export default function DashboardSidebarNav({ onNavigate, userRole, currentAgency, agencies, onAgencyChange }: DashboardSidebarNavProps) {
   const pathname = usePathname()
+  const router = useRouter()
+  const searchParams = useSearchParams()
 
   const isLinkActive = (item: NavItem) => {
     if (item.exact) {
@@ -248,12 +254,47 @@ export default function DashboardSidebarNav({ onNavigate, userRole }: DashboardS
     return pathname.startsWith(item.href)
   }
 
+  const isOwnerOrSuperAdmin = (role: string | undefined) =>
+    role === 'agency_owner' || role === 'super_admin'
+
   const visibleItems = NAV_ITEMS.filter(
-    (item) => !item.ownerOnly || userRole === 'agency_owner'
+    (item) => !item.ownerOnly || isOwnerOrSuperAdmin(userRole)
   )
+
+  const handleAgencyChange = async (agencyId: string) => {
+    const params = new URLSearchParams(searchParams.toString())
+    params.set('agency', agencyId)
+    router.push(`${pathname}?${params.toString()}`)
+    if (onAgencyChange) onAgencyChange(agencyId)
+  }
 
   return (
     <nav className="flex flex-col space-y-1 px-3 py-4">
+      {/* PORTFOLIO TOGGLE */}
+      {(userRole === 'super_admin' || userRole === 'agency_owner') && agencies && agencies.length > 0 && (
+        <div className="px-3 py-3 border-b border-slate-200 mb-4">
+          <div className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">
+            Portfolio
+          </div>
+          <select
+            value={currentAgency?.id ?? ''}
+            onChange={(e) => handleAgencyChange(e.target.value)}
+            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs focus:border-emerald-500 focus:outline-none"
+          >
+            {agencies.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.name}
+              </option>
+            ))}
+          </select>
+          {currentAgency && (
+            <p className="text-[9px] text-slate-500 mt-1">
+              Viewing: {currentAgency.name}
+            </p>
+          )}
+        </div>
+      )}
+
       <div className="px-3 pb-2 text-[10px] font-bold uppercase tracking-widest text-slate-400">
         Navigation
       </div>
