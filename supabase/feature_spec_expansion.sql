@@ -106,6 +106,24 @@ CREATE TABLE IF NOT EXISTS public.invoices (
     CONSTRAINT uq_invoices_lease_month UNIQUE (lease_id, billing_month)
 );
 
+-- Add new columns to existing invoices table (safe to re-run)
+ALTER TABLE public.invoices
+    ADD COLUMN IF NOT EXISTS interest_penalty_amount NUMERIC(12, 2) DEFAULT 0.00,
+    ADD COLUMN IF NOT EXISTS escalation_applied BOOLEAN DEFAULT false,
+    ADD COLUMN IF NOT EXISTS years_elapsed INT DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS invoice_number TEXT;
+
+-- Add parent_unit_id to existing units table
+ALTER TABLE public.units
+    ADD COLUMN IF NOT EXISTS parent_unit_id UUID REFERENCES public.units(id);
+
+-- Add bank fields to existing agency_billing_identity table
+ALTER TABLE public.agency_billing_identity
+    ADD COLUMN IF NOT EXISTS bank_name TEXT,
+    ADD COLUMN IF NOT EXISTS bank_account_name TEXT,
+    ADD COLUMN IF NOT EXISTS bank_account_number TEXT,
+    ADD COLUMN IF NOT EXISTS bank_branch TEXT;
+
 CREATE TABLE IF NOT EXISTS public.transactions (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     agency_id UUID REFERENCES public.agencies(id) ON DELETE CASCADE,
@@ -365,6 +383,9 @@ UPDATE public.invoices SET years_elapsed = 0 WHERE years_elapsed IS NULL;
 -- -----------------------------------------------------------------------------
 -- 8. SECURITY DEFINER HELPER: agency billing identity lookup
 -- -----------------------------------------------------------------------------
+-- Drop existing function if signature changed (safe to re-run)
+DROP FUNCTION IF EXISTS public.get_auth_agency_billing_identity();
+
 CREATE OR REPLACE FUNCTION public.get_auth_agency_billing_identity()
 RETURNS TABLE (
     id UUID,
