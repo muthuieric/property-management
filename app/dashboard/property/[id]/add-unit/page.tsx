@@ -55,6 +55,18 @@ export default async function AddUnitPage({
             />
           </div>
 
+          <div>
+            <label className="block text-sm font-medium mb-1" htmlFor="square_footage">
+              Square Footage (sq ft)
+            </label>
+            <input
+              type="number"
+              className="w-full rounded-md px-4 py-2 border bg-gray-50 focus:bg-white"
+              name="square_footage"
+              placeholder="e.g. 800"
+            />
+          </div>
+
           <button
             type="submit"
             className="mt-4 bg-green-700 text-white rounded-md px-4 py-2 hover:bg-green-800 transition"

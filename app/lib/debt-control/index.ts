@@ -47,22 +47,24 @@ export async function applyMonthlyInterest({
   today.setHours(0, 0, 0, 0)
   const todayStr = today.toISOString().slice(0, 10)
 
-  // Fetch all unpaid/partial invoices from before the period month
-  const { data: invoices, error: invErr } = await admin
-    .from('invoices')
-    .select(
-      `
+    // Fetch all unpaid/partial invoices from before the period month
+    const { data: invoices, error: invErr } = await admin
+      .from('invoices')
+      .select(
+        `
       id,
       tenant_id,
+      agency_id,
       billing_month,
       total_amount,
       status,
+      interest_penalty_amount,
       tenants ( first_name, last_name ),
       leases ( units ( unit_number, properties ( name ) ) )
     `
-    )
-    .in('status', ['unpaid', 'partial'])
-    .lt('billing_month', periodMonth)
+      )
+      .in('status', ['unpaid', 'partial'])
+      .lt('billing_month', periodMonth)
 
   if (invErr || !invoices) {
     console.error('applyMonthlyInterest fetch error:', invErr)
@@ -108,6 +110,20 @@ export async function applyMonthlyInterest({
       .from('invoices')
       .update({ total_amount: newTotal, interest_penalty_amount: Math.round((Number(inv.interest_penalty_amount || 0) + interestAmount) * 100) / 100 })
       .eq('id', inv.id)
+
+    // Append interest charge to tenant ledger
+    if (inv.tenant_id) {
+      await admin.from('ledger_entries').insert({
+        agency_id: inv.agency_id,
+        tenant_id: inv.tenant_id,
+        invoice_id: inv.id,
+        debit_account: 'Interest Receivable',
+        credit_account: 'Interest Income',
+        amount: interestAmount,
+        entry_date: todayStr,
+        reference: `INT-${periodMonth}`,
+      })
+    }
 
     results.push({
       invoiceId: inv.id,

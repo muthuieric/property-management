@@ -1,6 +1,6 @@
 // app/login/page.tsx
 import Link from 'next/link'
-import { login } from './actions'
+import { login, magicLink } from './actions'
 
 export default async function LoginPage({
   searchParams,
@@ -137,6 +137,38 @@ export default async function LoginPage({
               </button>
             </div>
           </form>
+
+          {/* MAGIC LINK ALTERNATIVE */}
+          <div className="mt-8 pt-6 border-t border-slate-100">
+            <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-4">
+              Or sign in without a password
+            </p>
+            <form action={magicLink} className="space-y-3">
+              <div>
+                <label
+                  htmlFor="magic-email"
+                  className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5"
+                >
+                  Work Email
+                </label>
+                <input
+                  id="magic-email"
+                  name="email"
+                  type="email"
+                  required
+                  placeholder="coordinator@property.co.ke"
+                  className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm bg-slate-50/70 text-slate-900 placeholder-slate-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-transparent transition shadow-xs"
+                />
+              </div>
+              <button
+                type="submit"
+                className="w-full inline-flex items-center justify-center rounded-xl bg-white border border-slate-200 px-4 py-3.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 transition-colors shadow-sm gap-2"
+              >
+                <span className="font-sans">&rarr;</span>
+                <span>Send Magic Link</span>
+              </button>
+            </form>
+          </div>
 
           {/* Card Footer */}
           <div className="mt-8 pt-6 border-t border-slate-100 flex flex-col items-center gap-3 text-xs text-slate-500">

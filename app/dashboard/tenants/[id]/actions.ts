@@ -423,16 +423,22 @@ export async function recordTenantManualPayment(
         .eq('id', openInvoice.id)
     }
 
-    revalidatePath(`/dashboard/tenants/${tenantId}`)
-    revalidatePath('/dashboard/tenants')
-    revalidatePath('/dashboard/financials')
-    revalidatePath('/dashboard/billing')
-    revalidatePath('/portal')
-
-    return {
-      success: true,
-      receipt_id,
-      transaction_id: newTx?.id,
+    // Create ledger entry for manual payment (Credit to tenant account)
+    try {
+      if (newTx?.id) {
+        await admin.from('ledger_entries').insert({
+          agency_id: agencyId,
+          tenant_id: tenantId,
+          transaction_id: newTx.id,
+          debit_account: 'Cash / Bank',
+          credit_account: 'Accounts Receivable',
+          amount,
+          entry_date: txDate,
+          reference: shortRef,
+        })
+      }
+    } catch (e) {
+      console.error('Failed to create ledger entry for manual payment:', e)
     }
   } catch (err: any) {
     console.error('recordTenantManualPayment exception:', err)

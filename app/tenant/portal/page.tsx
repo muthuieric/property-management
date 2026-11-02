@@ -4,14 +4,12 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import {
   VirtualizedDataTable,
-  type TableDensity,
 } from '@/app/components/data-table/virtualized-data-table'
 import {
   createColumnHelper,
 } from '@tanstack/react-table'
 import { useDashboardStore } from '@/app/lib/store/dashboard-store'
-import { cn } from '@/lib/utils'
-import { getTenantProfile, getTenantInvoices, type TenantInvoice, type TenantProfile } from './actions'
+import { getTenantProfile, getTenantInvoices, getTenantReceipts, type TenantInvoice, type TenantProfile, type TenantReceipt } from './actions'
 
 const columnHelper = createColumnHelper<TenantInvoice>()
 
@@ -81,6 +79,7 @@ const COLUMNS: any[] = [
 export default function TenantPortalPage() {
   const [profile, setProfile] = useState<TenantProfile | null>(null)
   const [invoices, setInvoices] = useState<TenantInvoice[]>([])
+  const [receipts, setReceipts] = useState<TenantReceipt[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -94,14 +93,17 @@ export default function TenantPortalPage() {
     ;(async () => {
       setLoading(true)
       try {
-        const [profResult, invResult] = await Promise.all([
+        const [profResult, invResult, recResult] = await Promise.all([
           getTenantProfile(),
           getTenantInvoices(),
+          getTenantReceipts(),
         ])
         setProfile(profResult.profile)
         setInvoices(invResult.invoices)
+        setReceipts(recResult.receipts)
         if (profResult.error) setError(profResult.error)
         if (invResult.error) setError(invResult.error)
+        if (recResult.error) setError(recResult.error)
       } catch (err) {
         console.error(err)
         setError('Failed to load tenant portal')
@@ -250,9 +252,114 @@ export default function TenantPortalPage() {
             </div>
           </div>
         </div>
-      )}
+        )}
 
-      {/* INVOICES TABLE */}
+        {/* DOCUMENT REPOSITORY */}
+        <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-4">
+            <div>
+              <h2 className="text-lg font-bold text-slate-900 mb-1">Your Documents</h2>
+              <p className="text-xs text-slate-500">
+                Download invoices, payment receipts, and your signed lease agreement.
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-4">
+            {/* SIGNED LEASE AGREEMENT */}
+            <div className="bg-slate-50 border border-slate-200 rounded-xl p-5">
+              <div className="flex items-center gap-3 mb-3">
+                <div className="w-8 h-8 rounded-lg bg-emerald-100 flex items-center justify-center text-emerald-600">
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                  </svg>
+                </div>
+                <div>
+                  <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
+                    Signed Lease Agreement
+                  </div>
+                  <div className="text-sm font-medium text-slate-900 mt-0.5">
+                    {profile?.leaseId ? `Lease #{profile.leaseId.slice(0, 8).toUpperCase()}` : 'No lease on file'}
+                  </div>
+                </div>
+              </div>
+              {profile?.documentUrl ? (
+                <a
+                  href={profile.documentUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-600 hover:text-emerald-800 underline underline-offset-4"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                  </svg>
+                  Download PDF
+                </a>
+              ) : (
+                <span className="text-xs text-slate-400 italic">No signed agreement on file</span>
+              )}
+            </div>
+
+            {/* PAYMENT RECEIPTS */}
+            <div className="bg-slate-50 border border-slate-200 rounded-xl p-5">
+              <div className="flex items-center gap-3 mb-3">
+                <div className="w-8 h-8 rounded-lg bg-emerald-100 flex items-center justify-center text-emerald-600">
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                  </svg>
+                </div>
+                <div>
+                  <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
+                    Payment Receipts ({receipts.length})
+                  </div>
+                  <div className="text-sm font-medium text-slate-900 mt-0.5">
+                    Download official payment receipts
+                  </div>
+                </div>
+              </div>
+              {receipts.length === 0 ? (
+                <p className="text-xs text-slate-400 italic">No payment receipts available yet.</p>
+              ) : (
+                <div className="space-y-2">
+                  {receipts.slice(0, 5).map((r) => (
+                    <Link
+                      key={r.id}
+                      href={`/portal/receipts/${r.receiptId ?? r.id}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center justify-between px-3 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 transition-colors text-sm"
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className="w-6 h-6 rounded bg-slate-200 flex items-center justify-center text-[10px] font-bold text-slate-600">
+                          #{r.receiptId?.slice(0, 6).toUpperCase() ?? 'RCPT'}
+                        </span>
+                        <div>
+                          <div className="text-slate-800 font-medium leading-tight">
+                            {r.propertyName ?? 'Payment'} • Unit {r.unitNumber ?? '—'}
+                          </div>
+                          <div className="text-[10px] text-slate-500">
+                            {r.transactionDate ? new Date(r.transactionDate).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : ''}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <div className="text-slate-900 font-bold">KES {r.amount.toLocaleString()}</div>
+                        <span className="text-[10px] text-emerald-600 font-semibold">Open Receipt</span>
+                      </div>
+                    </Link>
+                  ))}
+                  {receipts.length > 5 && (
+                    <p className="text-xs text-slate-400 italic mt-2">
+                      {receipts.length - 5} more receipt(s) available
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* INVOICES TABLE */}
       <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
         <div className="border-b border-slate-100 bg-slate-50 px-6 py-3 flex items-center justify-between">
           <div className="flex items-center gap-2">

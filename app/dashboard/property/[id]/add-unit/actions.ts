@@ -11,7 +11,8 @@ export async function addUnit(formData: FormData) {
 
   const property_id = formData.get('property_id') as string
   const unit_number = formData.get('unit_number') as string
-  const rent_amount = formData.get('rent_amount') as string
+  const base_rent = formData.get('base_rent') as string
+  const square_footage = formData.get('square_footage') as string
 
   const { error } = await supabase
     .from('units')
@@ -19,9 +20,10 @@ export async function addUnit(formData: FormData) {
       { 
         property_id, 
         unit_number, 
-        rent_amount,
+        base_rent: Number(base_rent) || 0,
+        square_footage: square_footage ? Number(square_footage) || null : null,
         is_occupied: false,
-        agency_id: agencyId // 3. Link to the Agency
+        agency_id: agencyId
       }
     ])
 

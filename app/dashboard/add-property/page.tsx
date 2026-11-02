@@ -63,6 +63,34 @@ export default async function AddPropertyPage({
             />
           </div>
 
+          <div>
+            <label className="block text-sm font-medium mb-1" htmlFor="property_code">
+              Property Code (e.g. KH/1)
+            </label>
+            <input
+              id="property_code"
+              className="w-full rounded-md px-4 py-2 border bg-gray-50 focus:bg-white"
+              name="property_code"
+              placeholder="e.g. KH/1"
+              required
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium mb-1" htmlFor="portfolio_entity">
+              Portfolio Entity
+            </label>
+            <select
+              id="portfolio_entity"
+              name="portfolio_entity"
+              className="w-full rounded-md px-4 py-2 border bg-gray-50 focus:bg-white"
+              required
+            >
+              <option value="Karan Holdings Ltd">Karan Holdings Ltd</option>
+              <option value="Kenply Ltd">Kenply Ltd</option>
+            </select>
+          </div>
+
           {/* Property Manager Dropdown */}
           <div>
             <label className="block text-sm font-medium mb-1" htmlFor="manager_id">

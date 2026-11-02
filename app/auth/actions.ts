@@ -83,3 +83,26 @@ export async function signOut() {
   revalidatePath('/', 'layout')
   redirect('/login')
 }
+
+export async function sendMagicLink(formData: FormData) {
+  const supabase = await createClient()
+
+  const email = formData.get('email') as string
+
+  if (!email) {
+    redirect('/login?message=Email is required')
+  }
+
+  const { error } = await supabase.auth.signInWithOtp({
+    email,
+    options: {
+      emailRedirectTo: `${process.env.NEXT_PUBLIC_SITE_URL ?? ''}/auth/callback`,
+    },
+  })
+
+  if (error) {
+    redirect(`/login?message=Unable to send magic link: ${error.message}`)
+  }
+
+  redirect('/login?message=Magic+link+sent.+Check+your+inbox+to+complete+sign-in.')
+}

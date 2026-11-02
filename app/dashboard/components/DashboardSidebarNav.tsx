@@ -220,6 +220,17 @@ const NAV_ITEMS: NavItem[] = [
     ),
   },
   {
+    name: 'Bank Statements',
+    href: '/dashboard/bank-statements',
+    badge: 'Reconcile',
+    ownerOnly: true,
+    icon: ({ className }) => (
+      <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 002.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.188a48.854 48.854 0 00-4.024-.262m-7.5 0c-.376.023-.75.05-1.124.08C4.095 3.973 3.25 4.936 3.25 6.071v12.43c0 1.242 1.008 2.25 2.25 2.25h9a2.25 2.25 0 002.25-2.25v-2.25m-9-15.75c.376.023.75.05 1.124.08 1.131.09 1.976 1.052 1.976 2.187v1.5H7.5v-1.5c0-1.135.845-2.098 1.976-2.187z" />
+      </svg>
+    ),
+  },
+  {
     name: 'Team Management',
     href: '/dashboard/team',
     ownerOnly: true,

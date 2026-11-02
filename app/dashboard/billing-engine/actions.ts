@@ -472,6 +472,23 @@ export async function generateInvoices({
       }
     }
     generated = toDbInsert.length
+    // Create double-entry ledger entries for invoices (Debits to AR, Credits to Revenue)
+    for (const inv of toDbInsert) {
+      try {
+        await supabase.from('ledger_entries').insert({
+          agency_id: inv.agency_id,
+          tenant_id: inv.tenant_id,
+          invoice_id: undefined,
+          debit_account: 'Accounts Receivable',
+          credit_account: 'Rent Income',
+          amount: inv.total_amount,
+          entry_date: new Date().toISOString().slice(0, 10),
+          reference: inv.invoice_number || `INV-${billingMonth}`,
+        })
+      } catch (e) {
+        // ignore
+      }
+    }
   }
 
   const totalAmount = money(
@@ -548,28 +565,28 @@ export async function createCreditNote({
 
   // Create double-entry ledger entries for the credit note
   // Debit: VAT Output (reversing liability), Credit: Debtors/Accounts Receivable
-  await supabase.from('ledger_entries').insert([
-    {
-      agency_id: agencyId,
-      tenant_id: originalInvoice.tenant_id ?? null,
-      invoice_id: originalInvoiceId,
-      debit_account: 'VAT Output',
-      credit_account: 'Accounts Receivable',
-      amount: creditVat,
-      entry_date: new Date().toISOString().slice(0, 10),
-      reference: creditNumber,
-    },
-    {
-      agency_id: agencyId,
-      tenant_id: originalInvoice.tenant_id ?? null,
-      invoice_id: originalInvoiceId,
-      debit_account: 'Accounts Receivable',
-      credit_account: 'Rent Income',
-      amount: creditAmount,
-      entry_date: new Date().toISOString().slice(0, 10),
-      reference: creditNumber,
-    },
-  ])
+      await supabase.from('ledger_entries').insert([
+        {
+          agency_id: agencyId,
+          tenant_id: originalInvoice.tenant_id ?? null,
+          invoice_id: originalInvoiceId,
+          debit_account: 'VAT Output',
+          credit_account: 'Accounts Receivable',
+          amount: Math.abs(creditVat),
+          entry_date: new Date().toISOString().slice(0, 10),
+          reference: creditNumber,
+        },
+        {
+          agency_id: agencyId,
+          tenant_id: originalInvoice.tenant_id ?? null,
+          invoice_id: originalInvoiceId,
+          debit_account: 'Accounts Receivable',
+          credit_account: 'Rent Income',
+          amount: Math.abs(creditAmount),
+          entry_date: new Date().toISOString().slice(0, 10),
+          reference: creditNumber,
+        },
+      ])
 
   return { success: true, creditNumber, error: null }
 }

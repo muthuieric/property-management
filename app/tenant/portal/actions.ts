@@ -18,6 +18,17 @@ export interface TenantInvoice {
   propertyName: string | null
 }
 
+export interface TenantReceipt {
+  id: string
+  receiptId: string | null
+  amount: number
+  paymentMethod: string | null
+  transactionDate: string | null
+  status: string | null
+  unitNumber: string | null
+  propertyName: string | null
+}
+
 export interface TenantProfile {
   id: string
   first_name: string | null
@@ -31,6 +42,8 @@ export interface TenantProfile {
   baseRent: number | null
   escalationPercentage: number | null
   leaseStatus: string | null
+  leaseId: string | null
+  documentUrl: string | null
 }
 
 export async function getTenantProfile(): Promise<{
@@ -61,7 +74,8 @@ export async function getTenantProfile(): Promise<{
         escalation_percentage,
         unit_number:units(unit_number),
         property_name:units(properties(name)),
-        lease_status
+        lease_status,
+        document_url
       )
     `
     )
@@ -91,6 +105,8 @@ export async function getTenantProfile(): Promise<{
       baseRent: Number(lease?.base_rent?.base_rent || 0) || null,
       escalationPercentage: lease?.escalation_percentage ?? null,
       leaseStatus: lease?.lease_status ?? null,
+      leaseId: lease?.id ?? null,
+      documentUrl: lease?.document_url ?? null,
     },
     error: null,
   }
@@ -144,8 +160,8 @@ export async function getTenantInvoices(): Promise<{
   }
 
   return {
-    invoices: invoices.map((inv: any) => {
-      const unit = inv.units as { unit_number: string | null; properties: { name: string | null } | null } | null
+    invoices: invoices.map((inv) => {
+      const unit = inv.units as any
       return {
         id: inv.id,
         invoiceNumber: inv.invoice_number ?? null,
@@ -158,6 +174,68 @@ export async function getTenantInvoices(): Promise<{
         status: inv.status,
         pdfUrl: inv.pdf_url ?? null,
         createdAt: inv.created_at,
+        unitNumber: unit?.unit_number ?? null,
+        propertyName: unit?.properties?.name ?? null,
+      }
+    }),
+    error: null,
+  }
+}
+
+export async function getTenantReceipts(): Promise<{
+  receipts: TenantReceipt[]
+  error: string | null
+}> {
+  const supabase = await createClient()
+
+  const { data: { user }, error: authErr } = await supabase.auth.getUser()
+  if (authErr || !user) {
+    return { receipts: [], error: 'Not authenticated' }
+  }
+
+  const { data: tenant, error: tenantErr } = await supabase
+    .from('tenants')
+    .select('id')
+    .eq('user_id', user.id)
+    .eq('is_active', true)
+    .single()
+
+  if (tenantErr || !tenant) {
+    return { receipts: [], error: 'Tenant not found' }
+  }
+
+  const { data: transactions, error } = await supabase
+    .from('transactions')
+    .select(
+      `
+      id,
+      receipt_id,
+      amount,
+      transaction_date,
+      status,
+      payment_method,
+      description,
+      units ( unit_number, properties ( name ) )
+    `
+    )
+    .eq('tenant_id', tenant.id)
+    .not('receipt_id', 'is', null)
+    .order('transaction_date', { ascending: false })
+
+  if (error || !transactions) {
+    return { receipts: [], error: error?.message ?? 'Failed to fetch receipts' }
+  }
+
+  return {
+    receipts: transactions.map((tx) => {
+      const unit = tx.units as any
+      return {
+        id: tx.id,
+        receiptId: tx.receipt_id ?? null,
+        amount: Number(tx.amount || 0),
+        paymentMethod: tx.payment_method ?? null,
+        transactionDate: tx.transaction_date ?? null,
+        status: tx.status ?? null,
         unitNumber: unit?.unit_number ?? null,
         propertyName: unit?.properties?.name ?? null,
       }

@@ -15,6 +15,8 @@ export async function addProperty(formData: FormData) {
   const name = formData.get('name') as string
   const location = formData.get('location') as string
   const property_type = (formData.get('property_type') as string) || null
+  const property_code = formData.get('property_code') as string
+  const portfolio_entity = formData.get('portfolio_entity') as string
   const rawManagerId = formData.get('manager_id') as string
 
   // Only Agency Owners can assign a manager
@@ -27,6 +29,8 @@ export async function addProperty(formData: FormData) {
         name, 
         location, 
         property_type,
+        property_code,
+        portfolio_entity,
         agency_id: agencyId,
         manager_id,
       }

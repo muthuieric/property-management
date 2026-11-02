@@ -1,8 +1,28 @@
 {
   "crons": [
     {
-      "path": "/api/cron/apply-interest",
+      "path": "/api/cron/generate-invoices",
       "schedule": "0 0 1 * *"
+    },
+    {
+      "path": "/api/cron/apply-interest",
+      "schedule": "0 0 * * *"
+    },
+    {
+      "path": "/api/cron/expiry-warnings",
+      "schedule": "0 6 * * *"
+    },
+    {
+      "path": "/api/financial/escalation",
+      "schedule": "0 1 * * *"
+    },
+    {
+      "path": "/api/financial/generate-invoices",
+      "schedule": "0 0 1 * *"
+    },
+    {
+      "path": "/api/financial/apply-penalties",
+      "schedule": "0 2 * * *"
     }
   ]
 }
