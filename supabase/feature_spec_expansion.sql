@@ -465,7 +465,7 @@ CREATE POLICY "Agencies RLS"
     ON public.agencies FOR ALL TO authenticated
     USING (
         public.get_auth_role() = 'super_admin'
-        OR agency_id = public.get_auth_agency_id()
+        OR id = public.get_auth_agency_id()
     );
 
 -- 2. profiles: super_admin sees all; agency staff see own agency; tenants see own
@@ -496,7 +496,9 @@ CREATE POLICY "Units RLS"
     ON public.units FOR ALL TO authenticated
     USING (
         public.get_auth_role() = 'super_admin'
-        OR agency_id = public.get_auth_agency_id()
+        OR property_id IN (
+            SELECT id FROM public.properties WHERE agency_id = public.get_auth_agency_id()
+        )
     );
 
 -- 5. tenants: super_admin sees all; agency staff see own agency; tenants see own
