@@ -145,6 +145,43 @@ function getMergeGroup(
 }
 
 /**
+ * Fetch applicable service charge rate for a property at the given billing month.
+ * Uses temporal rate table: rate effective on or before billing month, not yet expired.
+ */
+async function getServiceChargeRate(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  agencyId: string,
+  propertyId: string | null,
+  billingMonth: string
+): Promise<number> {
+  const [by, bm] = billingMonth.split('-').map(Number)
+  const billingDate = new Date(by, bm - 1, 1).toISOString().slice(0, 10)
+
+  const { data: rates, error } = await supabase
+    .from('service_rates')
+    .select('rate_per_sqft, effective_date, expiry_date, property_id')
+    .eq('agency_id', agencyId)
+    .lte('effective_date', billingDate)
+    .order('effective_date', { ascending: false })
+
+  if (error || !rates) return 0
+
+  // Filter to rates not yet expired, prefer property-specific over global
+  const validRates = rates.filter((r: any) => {
+    if (r.expiry_date && r.expiry_date < billingDate) return false
+    return true
+  })
+
+  const propertyRate = validRates.find((r: any) => r.property_id === propertyId)
+  if (propertyRate) return Number(propertyRate.rate_per_sqft)
+
+  const globalRate = validRates.find((r: any) => !r.property_id)
+  if (globalRate) return Number(globalRate.rate_per_sqft)
+
+  return 0
+}
+
+/**
  * Fetch unpaid invoices from previous billing months for a tenant
  * to calculate the 2% monthly interest penalty.
  */
@@ -235,7 +272,7 @@ export async function getBillingPreview({
   propertyId,
 }: {
   billingMonth: string
-  serviceChargeRate: number
+  serviceChargeRate?: number
   propertyId?: string
 }): Promise<BillingPreviewRow[]> {
   const { agencyId } = await getUserAgencyContext()
@@ -281,7 +318,7 @@ export async function getBillingPreview({
   // Fetch all units for this agency to build merge groups
   const { data: allUnits, error: unitsErr } = await supabase
     .from('units')
-    .select('id, unit_number, square_footage, parent_unit_id')
+    .select('id, unit_number, square_footage, parent_unit_id, property_id')
     .eq('agency_id', agencyId)
 
   const unitsMap = (allUnits || []) as UnitRow[]
@@ -303,6 +340,15 @@ export async function getBillingPreview({
 
     if (propertyId && property?.id !== propertyId) continue
 
+    // Look up temporal service charge rate for this property at this billing month
+    const effectiveRate = await getServiceChargeRate(
+      supabase,
+      agencyId,
+      property?.id ?? null,
+      billingMonth
+    )
+    const rate = serviceChargeRate !== undefined ? serviceChargeRate : effectiveRate
+
     // Build merge group for this unit
     const mergeGroup = getMergeGroup(unit, unitsMap)
     const isMerged = mergeGroup.unitNumbers.length > 1
@@ -312,7 +358,7 @@ export async function getBillingPreview({
     const displayUnitNumber = isMerged ? mergeGroup.unitNumbers.join(', ') : unit?.unit_number ?? null
 
     const baseRent = Number(unit?.base_rent || 0)
-    const rawServiceCharge = money(effectiveSquareFootage * serviceChargeRate)
+    const rawServiceCharge = money(effectiveSquareFootage * rate)
 
     const escalationPct = Number(lease.escalation_percentage || 0)
     const years = yearsElapsed(lease.start_date, billingMonth)
@@ -342,7 +388,7 @@ export async function getBillingPreview({
       propertyName: property?.name ?? null,
       baseRent: escalatedBaseRent,
       squareFootage: effectiveSquareFootage || null,
-      serviceChargeRate: serviceChargeRate,
+      serviceChargeRate: rate,
       serviceChargeAmount: escalatedServiceCharge,
       escalationPercentage: escalationPct,
       yearsElapsed: years,

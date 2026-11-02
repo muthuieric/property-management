@@ -172,6 +172,30 @@ export function generateInvoicePdf(data: InvoicePdfData): Buffer {
   doc.font('Helvetica')
   doc.text('Please quote the Invoice Number as the payment reference.', 50, y + 50)
 
+  // ---------- Legal Terms ----------
+  y += 70
+  doc.strokeColor('#0F766E').lineWidth(1).moveTo(50, y).lineTo(550, y).stroke()
+  y += 14
+  doc.fontSize(10).fillColor('#134E4A').font('Helvetica-Bold').text('Terms & Conditions', 50, y)
+  y += 14
+  doc.fontSize(8).fillColor('#475569').font('Helvetica')
+  doc.text(
+    '1. Rent is due on the first day of each month without deduction.',
+    50, y
+  )
+  doc.text(
+    '2. Installment payments are not acceptable.',
+    50, y + 10
+  )
+  doc.text(
+    '3. Arrears attract a 2% monthly interest penalty and may lead to auctioneer involvement.',
+    50, y + 20
+  )
+  doc.text(
+    '4. This invoice is issued in accordance with the lease agreement terms.',
+    50, y + 30
+  )
+
   // ---------- Footer ----------
   const pageHeight = doc.page.height
   doc.fontSize(8).fillColor('#94A3B8').font('Helvetica')

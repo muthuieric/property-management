@@ -220,7 +220,20 @@ CREATE TABLE IF NOT EXISTS public.credit_notes (
 );
 
 -- -----------------------------------------------------------------------------
--- 7. ledger_entries: double-entry tenant ledger
+-- 7. service_rates: temporal service charge rate table (Effective/Expiry dates)
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS public.service_rates (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    agency_id UUID NOT NULL REFERENCES public.agencies(id) ON DELETE CASCADE,
+    property_id UUID REFERENCES public.properties(id) ON DELETE CASCADE,
+    rate_per_sqft NUMERIC(10, 2) NOT NULL DEFAULT 0.00,
+    effective_date DATE NOT NULL,
+    expiry_date DATE,
+    created_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- -----------------------------------------------------------------------------
+-- 8. ledger_entries: double-entry tenant ledger
 -- -----------------------------------------------------------------------------
 CREATE INDEX IF NOT EXISTS idx_units_square_footage ON public.units(square_footage);
 CREATE INDEX IF NOT EXISTS idx_leases_escalation ON public.leases(escalation_percentage);
@@ -240,6 +253,8 @@ CREATE INDEX IF NOT EXISTS idx_invoice_sequences_agency ON public.invoice_sequen
 CREATE INDEX IF NOT EXISTS idx_credit_notes_agency ON public.credit_notes(agency_id);
 CREATE INDEX IF NOT EXISTS idx_credit_notes_original_invoice ON public.credit_notes(original_invoice_id);
 CREATE INDEX IF NOT EXISTS idx_invoices_invoice_number ON public.invoices(invoice_number);
+CREATE INDEX IF NOT EXISTS idx_service_rates_agency ON public.service_rates(agency_id);
+CREATE INDEX IF NOT EXISTS idx_service_rates_effective ON public.service_rates(effective_date);
 
 -- -----------------------------------------------------------------------------
 -- 6. ROW-LEVEL SECURITY
@@ -358,6 +373,26 @@ CREATE POLICY "Agency staff can view invoice sequences"
     );
 CREATE POLICY "Agency staff can manage invoice sequences"
     ON public.invoice_sequences FOR ALL TO authenticated
+    USING (
+        agency_id = public.get_auth_agency_id()
+        AND public.get_auth_role() = 'agency_owner'
+    )
+    WITH CHECK (
+        agency_id = public.get_auth_agency_id()
+        AND public.get_auth_role() = 'agency_owner'
+    );
+
+-- 6f. service_rates
+ALTER TABLE public.service_rates ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Agency staff can view service rates" ON public.service_rates;
+DROP POLICY IF EXISTS "Agency staff can manage service rates" ON public.service_rates;
+CREATE POLICY "Agency staff can view service rates"
+    ON public.service_rates FOR SELECT TO authenticated
+    USING (
+        agency_id = public.get_auth_agency_id()
+    );
+CREATE POLICY "Agency staff can manage service rates"
+    ON public.service_rates FOR ALL TO authenticated
     USING (
         agency_id = public.get_auth_agency_id()
         AND public.get_auth_role() = 'agency_owner'
