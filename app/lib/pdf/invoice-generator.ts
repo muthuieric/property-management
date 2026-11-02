@@ -10,8 +10,13 @@ export interface InvoicePdfData {
   propertyName: string | null
   baseRent: number
   serviceChargeAmount: number
+  escalationPercentage: number
+  yearsElapsed: number
+  escalatedBaseRent: number
+  escalatedServiceCharge: number
   vatRate: number
   vatAmount: number
+  interestPenalty: number
   totalAmount: number
   status: string
   companyName: string | null
@@ -19,6 +24,10 @@ export interface InvoicePdfData {
   taxPin: string | null
   companyEmail: string | null
   companyPhone: string | null
+  bankName: string | null
+  bankAccountName: string | null
+  bankAccountNumber: string | null
+  bankBranch: string | null
   issuedAt: string
 }
 
@@ -94,13 +103,15 @@ export function generateInvoicePdf(data: InvoicePdfData): Buffer {
   y += 14
   doc.strokeColor('#99F6E4').lineWidth(0.5).moveTo(50, y).lineTo(550, y).stroke()
 
-  const rows: Array<{ label: string; value: number }> = [
-    { label: 'Base Rent', value: data.baseRent },
-    { label: 'Service Charge', value: data.serviceChargeAmount },
-    { label: `VAT (${data.vatRate}%)`, value: data.vatAmount },
+  const rows: Array<{ label: string; value: number; show: boolean }> = [
+    { label: 'Base Rent', value: data.escalatedBaseRent, show: true },
+    { label: 'Service Charge', value: data.escalatedServiceCharge, show: data.escalatedServiceCharge > 0 },
+    { label: `VAT (${data.vatRate}%)`, value: data.vatAmount, show: data.vatAmount > 0 },
+    { label: 'Interest Penalty (2% p.m.)', value: data.interestPenalty, show: data.interestPenalty > 0 },
   ]
 
   for (const row of rows) {
+    if (!row.show) continue
     y += 18
     doc.fontSize(9).fillColor('#475569').font('Helvetica').text(row.label, colX.item, y)
     doc.text(KES_FORMAT.format(row.value), colX.amount, y, { align: 'right' })
@@ -110,15 +121,43 @@ export function generateInvoicePdf(data: InvoicePdfData): Buffer {
   doc.strokeColor('#99F6E4').lineWidth(0.5).moveTo(50, y).lineTo(550, y).stroke()
 
   // ---------- Totals ----------
+  const subtotal = data.escalatedBaseRent + data.escalatedServiceCharge
   y += 16
   doc.fontSize(10).fillColor('#134E4A').font('Helvetica-Bold').text('Subtotal:', 380, y)
-  doc.text(KES_FORMAT.format(data.baseRent + data.serviceChargeAmount), 430, y, { align: 'right' })
+  doc.text(KES_FORMAT.format(subtotal), 430, y, { align: 'right' })
   y += 16
   doc.text(`VAT (${data.vatRate}%):`, 380, y)
   doc.text(KES_FORMAT.format(data.vatAmount), 430, y, { align: 'right' })
+  if (data.interestPenalty > 0) {
+    y += 16
+    doc.text('Interest Penalty (2% p.m.):', 380, y)
+    doc.text(KES_FORMAT.format(data.interestPenalty), 430, y, { align: 'right' })
+  }
   y += 16
   doc.fontSize(11).fillColor('#0F766E').text('TOTAL:', 380, y)
   doc.text(KES_FORMAT.format(data.totalAmount), 430, y, { align: 'right' })
+
+  // ---------- Payment Instructions ----------
+  y += 30
+  doc.strokeColor('#0F766E').lineWidth(1).moveTo(50, y).lineTo(550, y).stroke()
+  y += 14
+  doc.fontSize(10).fillColor('#134E4A').font('Helvetica-Bold').text('Payment Instructions', 50, y)
+  y += 14
+  doc.fontSize(9).fillColor('#475569').font('Helvetica')
+  doc.text('Pay via RTGS or Cheque to:', 50, y)
+  y += 14
+  doc.font('Helvetica-Bold').text('I&M Bank', 50, y)
+  if (data.bankAccountName) {
+    doc.text(`Account Name: ${data.bankAccountName}`, 50, y + 12)
+  }
+  if (data.bankAccountNumber) {
+    doc.text(`Account Number: ${data.bankAccountNumber}`, 50, y + 24)
+  }
+  if (data.bankBranch) {
+    doc.text(`Branch: ${data.bankBranch}`, 50, y + 36)
+  }
+  doc.font('Helvetica')
+  doc.text('Please quote the Invoice Number as the payment reference.', 50, y + 50)
 
   // ---------- Footer ----------
   const pageHeight = doc.page.height
@@ -130,7 +169,7 @@ export function generateInvoicePdf(data: InvoicePdfData): Buffer {
     { width: 500, align: 'center' }
   )
   doc.text(
-    `VAT PIN: ${data.vatPin ?? 'N/A'}  |  Tax PIN: ${data.taxPin ?? 'N/A'}`,
+    `VAT PIN: ${data.vatPin ?? 'N/A'}  |  Tax PIN: ${data.taxPin ?? 'N/A'}  |  Bank: I&M Bank`,
     50,
     pageHeight - 48,
     { width: 500, align: 'center' }

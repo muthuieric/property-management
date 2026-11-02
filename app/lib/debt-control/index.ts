@@ -106,7 +106,7 @@ export async function applyMonthlyInterest({
     // Increase the invoice total by the interest amount
     await admin
       .from('invoices')
-      .update({ total_amount: newTotal })
+      .update({ total_amount: newTotal, interest_penalty_amount: Math.round((Number(inv.interest_penalty_amount || 0) + interestAmount) * 100) / 100 })
       .eq('id', inv.id)
 
     results.push({

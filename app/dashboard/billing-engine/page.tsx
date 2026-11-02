@@ -59,6 +59,30 @@ const COLUMNS = [
       return value.toLocaleString(undefined, { minimumFractionDigits: 2 })
     },
   }),
+  columnHelper.accessor('escalationPercentage', {
+    header: 'Esc %',
+    meta: { width: '70px', alignRight: true },
+    cell: (info) => {
+      const value = info.getValue() as number
+      return value > 0 ? `${value}%` : '—'
+    },
+  }),
+  columnHelper.accessor('yearsElapsed', {
+    header: 'Yrs',
+    meta: { width: '60px', alignRight: true },
+    cell: (info) => {
+      const value = info.getValue() as number
+      return value > 0 ? value.toString() : '—'
+    },
+  }),
+  columnHelper.accessor('interestPenalty', {
+    header: 'Interest 2% (KES)',
+    meta: { width: '130px', alignRight: true },
+    cell: (info) => {
+      const value = info.getValue() as number
+      return value > 0 ? value.toLocaleString(undefined, { minimumFractionDigits: 2 }) : '—'
+    },
+  }),
   columnHelper.accessor('vatAmount', {
     header: 'VAT 16% (KES)',
     meta: { width: '140px', alignRight: true },
@@ -195,9 +219,9 @@ export default function BillingEnginePage() {
           <h1 className="text-2xl md:text-3xl font-bold tracking-tight text-slate-900 font-sans mt-1">
             Automated Monthly Billing
           </h1>
-          <p className="text-xs text-slate-500 mt-1">
-            Generate invoices for all active leases: base rent + service charge (per sq ft) + 16% VAT.
-          </p>
+            <p className="text-xs text-slate-500 mt-1">
+              Generate invoices: base rent + service charge (per sq ft) + 3% annual compound escalation + 16% VAT + 2% interest on arrears.
+            </p>
         </div>
         <div className="flex items-center gap-3">
           <select

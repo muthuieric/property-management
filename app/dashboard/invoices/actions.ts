@@ -58,15 +58,19 @@ export async function generateInvoicePdfAction({
         billing_month,
         base_rent_amount,
         service_charge_amount,
+        service_charge_rate,
         vat_rate,
         vat_amount,
+        interest_penalty_amount,
+        escalation_applied,
+        years_elapsed,
         total_amount,
         status,
         created_at,
         tenants ( first_name, last_name ),
-        leases ( unit_id ),
+        leases ( unit_id, escalation_percentage ),
         units ( unit_number, properties ( name ) ),
-        agency_billing_identity ( company_name, vat_pin, tax_pin, email, phone )
+        agency_billing_identity ( company_name, vat_pin, tax_pin, email, phone, bank_name, bank_account_name, bank_account_number, bank_branch )
       `
       )
       .eq('id', invoiceId)
@@ -85,6 +89,10 @@ export async function generateInvoicePdfAction({
       tax_pin: string | null
       email: string | null
       phone: string | null
+      bank_name: string | null
+      bank_account_name: string | null
+      bank_account_number: string | null
+      bank_branch: string | null
     } | null)
 
     const pdfData: InvoicePdfData = {
@@ -96,8 +104,13 @@ export async function generateInvoicePdfAction({
       propertyName: unit?.properties?.name ?? null,
       baseRent: Number(invoice.base_rent_amount || 0),
       serviceChargeAmount: Number(invoice.service_charge_amount || 0),
+      escalationPercentage: Number(((invoice as any).leases as Array<{ escalation_percentage: number | null }> | null)?.[0]?.escalation_percentage ?? 0),
+      yearsElapsed: Number(invoice.years_elapsed || 0),
+      escalatedBaseRent: Number(invoice.base_rent_amount || 0),
+      escalatedServiceCharge: Number(invoice.service_charge_amount || 0),
       vatRate: Number(invoice.vat_rate || 16),
       vatAmount: Number(invoice.vat_amount || 0),
+      interestPenalty: Number(invoice.interest_penalty_amount || 0),
       totalAmount: Number(invoice.total_amount || 0),
       status: invoice.status,
       companyName: billingIdentity?.company_name ?? 'Luffi Tech Property Management',
@@ -105,6 +118,10 @@ export async function generateInvoicePdfAction({
       taxPin: billingIdentity?.tax_pin ?? null,
       companyEmail: billingIdentity?.email ?? null,
       companyPhone: billingIdentity?.phone ?? null,
+      bankName: billingIdentity?.bank_name ?? null,
+      bankAccountName: billingIdentity?.bank_account_name ?? null,
+      bankAccountNumber: billingIdentity?.bank_account_number ?? null,
+      bankBranch: billingIdentity?.bank_branch ?? null,
       issuedAt: invoice.created_at,
     }
 
